@@ -4,4 +4,4 @@ colorama
 pandas
 openpyxl
 rapidfuzz
-colorama
+extra-streamlit-components
