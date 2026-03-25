@@ -2,26 +2,15 @@ import re
 import sys
 from datetime import datetime, timedelta
 
-try:
-    from .config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
-    from .console_utils import H, OK, WARN, ERR, DIM
-    from .odoo_client import (
-        odoo_connect,
-        find_team_ventes,
-        get_active_sales_users,
-        lead_exists,
-        find_or_create_tag,
-    )
-except ImportError:
-    from config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
-    from console_utils import H, OK, WARN, ERR, DIM
-    from odoo_client import (
-        odoo_connect,
-        find_team_ventes,
-        get_active_sales_users,
-        lead_exists,
-        find_or_create_tag,
-    )
+from .config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
+from .console_utils import H, OK, WARN, ERR, DIM
+from .odoo_client import (
+    odoo_connect,
+    find_team_ventes,
+    get_active_sales_users,
+    lead_exists,
+    find_or_create_tag,
+)
 
 PROSPECTION_TAG = "Prospection"
 
