@@ -1,7 +1,9 @@
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import streamlit as st
+import extra_streamlit_components as stx
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 if str(PROJECT_DIR) not in sys.path:
@@ -21,6 +23,94 @@ from odoo_import.config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
 from odoo_import.odoo_client import odoo_connect, find_team_ventes, get_active_sales_users
 
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
+
+
+@st.cache_resource
+def get_cookie_manager():
+    return stx.CookieManager()
+
+
+def require_simple_auth():
+    username = st.secrets["auth_simple"]["username"]
+    password = st.secrets["auth_simple"]["password"]
+    cookie_name = st.secrets["auth_simple"]["cookie_name"]
+    cookie_key = st.secrets["auth_simple"]["cookie_key"]
+    cookie_expiry_days = int(st.secrets["auth_simple"].get("cookie_expiry_days", 30))
+
+    cookie_manager = get_cookie_manager()
+
+    if "authenticated" not in st.session_state:
+        st.session_state["authenticated"] = False
+
+    if "auth_user" not in st.session_state:
+        st.session_state["auth_user"] = ""
+
+    existing_cookie = cookie_manager.get(cookie_name)
+    expected_cookie_value = f"{username}:{cookie_key}"
+
+    if existing_cookie == expected_cookie_value:
+        st.session_state["authenticated"] = True
+        st.session_state["auth_user"] = username
+        return
+
+    if not st.session_state["authenticated"]:
+        st.title("Accès privé ABM")
+        st.caption("Connexion requise pour accéder à l'application.")
+
+        input_user = st.text_input("Identifiant")
+        input_pass = st.text_input("Mot de passe", type="password")
+        remember_me = st.checkbox("Rester connecté 30 jours", value=True)
+
+        if st.button("Se connecter", type="primary"):
+            if input_user == username and input_pass == password:
+                st.session_state["authenticated"] = True
+                st.session_state["auth_user"] = input_user
+
+                if remember_me:
+                    cookie_manager.set(
+                        cookie_name,
+                        expected_cookie_value,
+                        expires_at=datetime.now() + timedelta(days=cookie_expiry_days),
+                    )
+
+                st.rerun()
+            else:
+                st.error("Identifiants incorrects.")
+
+        st.stop()
+
+
+def render_logout():
+    cookie_name = st.secrets["auth_simple"]["cookie_name"]
+    cookie_manager = get_cookie_manager()
+
+    with st.sidebar:
+        st.markdown("### Session")
+        st.write(f"Connecté : {st.session_state.get('auth_user', '-')}")
+        if st.button("Se déconnecter", use_container_width=True):
+            cookie_manager.delete(cookie_name)
+            st.session_state["authenticated"] = False
+            st.session_state["auth_user"] = ""
+            st.rerun()
+
+
+def add_audit_trail(vals, actor_user, seller_name, mode):
+    stamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+    audit_block = (
+        f"--- Trace application ---\n"
+        f"Action : {mode}\n"
+        f"Compte connecté : {actor_user or '-'}\n"
+        f"Commercial sélectionné : {seller_name or '-'}\n"
+        f"Date : {stamp}"
+    )
+
+    current_description = (vals.get("description") or "").strip()
+    if current_description:
+        vals["description"] = f"{audit_block}\n\n{current_description}"
+    else:
+        vals["description"] = audit_block
+
+    return vals
 
 
 @st.cache_resource
@@ -134,6 +224,7 @@ def compute_preview(data, seller_name, seller_user_id):
     work_data = dict(data)
     work_data["_uid"] = uid
     work_data["_models"] = models
+    work_data["_actor_user"] = st.session_state.get("auth_user", "")
 
     existing_id = detect_existing_lead(models, uid, work_data)
     existing_data = read_lead_summary(models, uid, existing_id) if existing_id else None
@@ -144,6 +235,13 @@ def compute_preview(data, seller_name, seller_user_id):
         seller_user_id,
         replace_tags=existing_id is None,
         existing_description=existing_data.get("description") if existing_data else None,
+    )
+
+    preview_vals = add_audit_trail(
+        preview_vals,
+        actor_user=st.session_state.get("auth_user", ""),
+        seller_name=seller_name,
+        mode="prévisualisation",
     )
 
     st.session_state["preview_data"] = work_data
@@ -176,6 +274,7 @@ def show_existing(existing):
 
 def show_preview(preview_vals, raw_data, seller_name):
     st.subheader("Prévisualisation")
+    st.write(f"**Compte connecté :** {st.session_state.get('auth_user') or '-'}")
     st.write(f"**Commercial :** {seller_name}")
     st.write(f"**Titre :** {build_title(raw_data)}")
     st.write(f"**Entreprise :** {raw_data.get('partner_name') or '-'}")
@@ -219,9 +318,12 @@ def update_lead(lead_id, vals):
     )
 
 
+require_simple_auth()
+render_logout()
+
 _init_state()
 st.title("Saisie prospection Odoo V2")
-st.caption("Version web avec prévisualisation, contrôle des leads similaires et confirmation finale.")
+st.caption("Version web sécurisée par identifiant partagé, avec contrôle des leads similaires et confirmation finale.")
 
 try:
     uid, models = get_odoo()
@@ -326,6 +428,12 @@ if preview_data and preview_vals:
                         replace_tags=False,
                         existing_description=existing_data.get("description") if existing_data else None,
                     )
+                    vals = add_audit_trail(
+                        vals,
+                        actor_user=st.session_state.get("auth_user", ""),
+                        seller_name=st.session_state.get("seller_name", ""),
+                        mode="mise à jour lead existant",
+                    )
                     update_lead(existing_id, vals)
                     st.success(f"Lead mis à jour (ID {existing_id}).")
                     reset_all()
@@ -337,6 +445,12 @@ if preview_data and preview_vals:
                         st.session_state["seller_user_id"],
                         replace_tags=True,
                         existing_description=None,
+                    )
+                    vals = add_audit_trail(
+                        vals,
+                        actor_user=st.session_state.get("auth_user", ""),
+                        seller_name=st.session_state.get("seller_name", ""),
+                        mode="création nouveau lead malgré doublon",
                     )
                     lead_id = create_lead(vals)
                     st.success(f"Nouveau lead créé (ID {lead_id}).")
@@ -365,6 +479,12 @@ if preview_data and preview_vals:
                         st.session_state["seller_user_id"],
                         replace_tags=True,
                         existing_description=None,
+                    )
+                    vals = add_audit_trail(
+                        vals,
+                        actor_user=st.session_state.get("auth_user", ""),
+                        seller_name=st.session_state.get("seller_name", ""),
+                        mode="création lead",
                     )
                     lead_id = create_lead(vals)
                     st.success(f"Piste créée dans Odoo (ID {lead_id}).")
