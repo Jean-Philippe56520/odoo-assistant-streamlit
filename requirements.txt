@@ -1,2 +1,7 @@
 streamlit
 python-dotenv
+colorama
+pandas
+openpyxl
+rapidfuzz
+colorama
