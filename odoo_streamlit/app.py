@@ -25,7 +25,6 @@ from odoo_import.odoo_client import odoo_connect, find_team_ventes, get_active_s
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
 
 
-@st.cache_resource
 def get_cookie_manager():
     return stx.CookieManager()
 
@@ -37,16 +36,15 @@ def require_simple_auth():
     cookie_key = st.secrets["auth_simple"]["cookie_key"]
     cookie_expiry_days = int(st.secrets["auth_simple"].get("cookie_expiry_days", 30))
 
-    cookie_manager = get_cookie_manager()
-
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
 
     if "auth_user" not in st.session_state:
         st.session_state["auth_user"] = ""
 
-    existing_cookie = cookie_manager.get(cookie_name)
+    cookie_manager = get_cookie_manager()
     expected_cookie_value = f"{username}:{cookie_key}"
+    existing_cookie = cookie_manager.get(cookie_name)
 
     if existing_cookie == expected_cookie_value:
         st.session_state["authenticated"] = True
