@@ -24,9 +24,8 @@ from odoo_import.odoo_client import odoo_connect, find_team_ventes, get_active_s
 
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
 
-
-def get_cookie_manager():
-    return stx.CookieManager()
+# Une seule instance du composant cookie pour tout le script.
+COOKIE_MANAGER = stx.CookieManager(key="abm_cookie_manager")
 
 
 def require_simple_auth():
@@ -42,9 +41,8 @@ def require_simple_auth():
     if "auth_user" not in st.session_state:
         st.session_state["auth_user"] = ""
 
-    cookie_manager = get_cookie_manager()
     expected_cookie_value = f"{username}:{cookie_key}"
-    existing_cookie = cookie_manager.get(cookie_name)
+    existing_cookie = COOKIE_MANAGER.get(cookie_name)
 
     if existing_cookie == expected_cookie_value:
         st.session_state["authenticated"] = True
@@ -55,17 +53,17 @@ def require_simple_auth():
         st.title("Accès privé ABM")
         st.caption("Connexion requise pour accéder à l'application.")
 
-        input_user = st.text_input("Identifiant")
-        input_pass = st.text_input("Mot de passe", type="password")
-        remember_me = st.checkbox("Rester connecté 30 jours", value=True)
+        input_user = st.text_input("Identifiant", key="login_username")
+        input_pass = st.text_input("Mot de passe", type="password", key="login_password")
+        remember_me = st.checkbox("Rester connecté 30 jours", value=True, key="login_remember_me")
 
-        if st.button("Se connecter", type="primary"):
+        if st.button("Se connecter", type="primary", key="login_submit"):
             if input_user == username and input_pass == password:
                 st.session_state["authenticated"] = True
                 st.session_state["auth_user"] = input_user
 
                 if remember_me:
-                    cookie_manager.set(
+                    COOKIE_MANAGER.set(
                         cookie_name,
                         expected_cookie_value,
                         expires_at=datetime.now() + timedelta(days=cookie_expiry_days),
@@ -80,13 +78,12 @@ def require_simple_auth():
 
 def render_logout():
     cookie_name = st.secrets["auth_simple"]["cookie_name"]
-    cookie_manager = get_cookie_manager()
 
     with st.sidebar:
         st.markdown("### Session")
         st.write(f"Connecté : {st.session_state.get('auth_user', '-')}")
-        if st.button("Se déconnecter", use_container_width=True):
-            cookie_manager.delete(cookie_name)
+        if st.button("Se déconnecter", use_container_width=True, key="logout_button"):
+            COOKIE_MANAGER.delete(cookie_name)
             st.session_state["authenticated"] = False
             st.session_state["auth_user"] = ""
             st.rerun()
@@ -343,24 +340,25 @@ with st.form("lead_form"):
         "Commercial",
         seller_names,
         index=seller_names.index(st.session_state["seller_name"]) if st.session_state["seller_name"] in seller_names else 0,
+        key="seller_selectbox",
     )
 
     st.subheader("Contact")
-    partner_name = st.text_input("Nom de l'entreprise *", value=st.session_state["form_data"]["partner_name"])
-    contact_name = st.text_input("Nom du contact", value=st.session_state["form_data"]["contact_name"])
-    phone_raw = st.text_input("Téléphone", value=st.session_state["form_data"]["phone"])
-    mobile_raw = st.text_input("Mobile", value=st.session_state["form_data"]["mobile"])
-    email_raw = st.text_input("Email", value=st.session_state["form_data"]["email_from"])
+    partner_name = st.text_input("Nom de l'entreprise *", value=st.session_state["form_data"]["partner_name"], key="partner_name")
+    contact_name = st.text_input("Nom du contact", value=st.session_state["form_data"]["contact_name"], key="contact_name")
+    phone_raw = st.text_input("Téléphone", value=st.session_state["form_data"]["phone"], key="phone")
+    mobile_raw = st.text_input("Mobile", value=st.session_state["form_data"]["mobile"], key="mobile")
+    email_raw = st.text_input("Email", value=st.session_state["form_data"]["email_from"], key="email_from")
 
     st.subheader("Adresse")
-    street = st.text_input("Adresse", value=st.session_state["form_data"]["street"])
-    street2 = st.text_input("Complément d'adresse", value=st.session_state["form_data"]["street2"])
-    zip_code = st.text_input("Code postal", value=st.session_state["form_data"]["zip"])
-    city = st.text_input("Ville", value=st.session_state["form_data"]["city"])
+    street = st.text_input("Adresse", value=st.session_state["form_data"]["street"], key="street")
+    street2 = st.text_input("Complément d'adresse", value=st.session_state["form_data"]["street2"], key="street2")
+    zip_code = st.text_input("Code postal", value=st.session_state["form_data"]["zip"], key="zip")
+    city = st.text_input("Ville", value=st.session_state["form_data"]["city"], key="city")
 
     st.subheader("Notes")
-    current_equipment = st.text_area("Équipement actuel", value=st.session_state["form_data"]["current_equipment"])
-    free_comment = st.text_area("Commentaire libre", value=st.session_state["form_data"]["free_comment"])
+    current_equipment = st.text_area("Équipement actuel", value=st.session_state["form_data"]["current_equipment"], key="current_equipment")
+    free_comment = st.text_area("Commentaire libre", value=st.session_state["form_data"]["free_comment"], key="free_comment")
 
     submitted = st.form_submit_button("Prévisualiser")
 
@@ -410,12 +408,13 @@ if preview_data and preview_vals:
                 "Créer un nouveau lead quand même",
                 "Annuler",
             ),
+            key="duplicate_action_radio",
         )
         confirm = st.checkbox("Je confirme cette action", key="confirm_existing")
 
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Valider l'action", type="primary"):
+            if st.button("Valider l'action", type="primary", key="validate_existing_action"):
                 if not confirm:
                     st.error("Merci de confirmer l'action.")
                 elif action == "Mettre à jour le lead existant":
@@ -459,7 +458,7 @@ if preview_data and preview_vals:
                     reset_all()
                     st.rerun()
         with col2:
-            if st.button("Revenir à la saisie"):
+            if st.button("Revenir à la saisie", key="back_to_form_existing"):
                 reset_preview_only()
                 st.rerun()
     else:
@@ -467,7 +466,7 @@ if preview_data and preview_vals:
 
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Créer la piste", type="primary"):
+            if st.button("Créer la piste", type="primary", key="create_new_lead"):
                 if not confirm:
                     st.error("Merci de confirmer la création.")
                 else:
@@ -489,6 +488,6 @@ if preview_data and preview_vals:
                     reset_all()
                     st.rerun()
         with col2:
-            if st.button("Modifier la saisie"):
+            if st.button("Modifier la saisie", key="back_to_form_create"):
                 reset_preview_only()
                 st.rerun()
