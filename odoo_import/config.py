@@ -26,6 +26,7 @@ try:
 except Exception:
     st = None
 
+
 def _read_secret(name: str) -> str:
     value = os.getenv(name, "").strip()
     if value:
@@ -36,6 +37,7 @@ def _read_secret(name: str) -> str:
         except Exception:
             return ""
     return ""
+
 
 ODOO_URL = _read_secret("ODOO_URL")
 ODOO_DB = _read_secret("ODOO_DB")
@@ -69,7 +71,13 @@ if not ODOO_API_KEY:
     missing.append("ODOO_API_KEY")
 
 if missing:
-    raise ValueError(
-        "Variables d'environnement manquantes dans le fichier .env : "
-        + ", ".join(missing)
-    )
+    if st is not None:
+        raise ValueError(
+            "Variables de configuration manquantes dans Streamlit Secrets : "
+            + ", ".join(missing)
+        )
+    else:
+        raise ValueError(
+            "Variables d'environnement manquantes (.env) : "
+            + ", ".join(missing)
+        )

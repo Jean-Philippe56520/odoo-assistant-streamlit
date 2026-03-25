@@ -1,12 +1,23 @@
 import os, re, sys, unicodedata
 import pandas as pd
-from .config import FILES_DIR, ALLOWED_EXT, FORCE_CREATE, ODOO_DB, ODOO_API_KEY, LEAD_MODEL
-from .console_utils import H, OK, WARN, ERR, DIM
-from .odoo_client import (
-    odoo_connect, find_team_ventes, get_active_sales_users,
-    lead_exists, find_or_create_tag
-)
-from .mapping_wizard import autosuggest_mapping, run_mapping_wizard, notes_wizard, print_preview_block
+
+try:
+    from .config import FILES_DIR, ALLOWED_EXT, FORCE_CREATE, ODOO_DB, ODOO_API_KEY, LEAD_MODEL
+    from .console_utils import H, OK, WARN, ERR, DIM
+    from .odoo_client import (
+        odoo_connect, find_team_ventes, get_active_sales_users,
+        lead_exists, find_or_create_tag
+    )
+    from .mapping_wizard import autosuggest_mapping, run_mapping_wizard, notes_wizard, print_preview_block
+except ImportError:
+    from config import FILES_DIR, ALLOWED_EXT, FORCE_CREATE, ODOO_DB, ODOO_API_KEY, LEAD_MODEL
+    from console_utils import H, OK, WARN, ERR, DIM
+    from odoo_client import (
+        odoo_connect, find_team_ventes, get_active_sales_users,
+        lead_exists, find_or_create_tag
+    )
+    from mapping_wizard import autosuggest_mapping, run_mapping_wizard, notes_wizard, print_preview_block
+
 
 def pick_file():
     if not os.path.isdir(FILES_DIR):
@@ -30,6 +41,7 @@ def pick_file():
             return os.path.join(FILES_DIR, files[int(raw)-1])
         print(WARN("Numéro invalide."))
 
+
 def load_file(path):
     p = path.lower()
     if p.endswith(".csv"):
@@ -37,6 +49,7 @@ def load_file(path):
     if p.endswith((".xlsx", ".xls")):
         return pd.read_excel(path)
     raise ValueError("Format non supporté. CSV ou XLSX.")
+
 
 def build_vals_from_row(row, mapping, notes_cfg, models, uid, team_id, default_seller_user_id):
     vals = {}

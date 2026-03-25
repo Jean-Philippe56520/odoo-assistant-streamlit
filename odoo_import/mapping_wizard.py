@@ -1,8 +1,14 @@
 import re, unicodedata
 import pandas as pd
 from rapidfuzz import fuzz, process
-from .console_utils import H, OK, WARN, DIM, ask_choice, ask_yes_no
-from .odoo_client import find_or_create_tag
+
+try:
+    from .console_utils import H, OK, WARN, DIM, ask_choice, ask_yes_no
+    from .odoo_client import find_or_create_tag
+except ImportError:
+    from console_utils import H, OK, WARN, DIM, ask_choice, ask_yes_no
+    from odoo_client import find_or_create_tag
+
 
 def norm(s: str) -> str:
     if not s:
@@ -12,6 +18,7 @@ def norm(s: str) -> str:
     s = "".join(c for c in s if not unicodedata.combining(c))
     s = re.sub(r"[^a-z0-9]+", "", s)
     return s
+
 
 SUGGESTIONS = {
     "name": ["societe","raisonsociale","enseigne","nom","client","prospect","entreprise","etablissement","company","lead"],
@@ -35,6 +42,7 @@ NOTE_HINTS = set(map(norm, [
     "commentaire","commentaires","notes","note","remarque","infos","besoin",
     "comment","comments","details","need","interest"
 ]))
+
 
 def autosuggest_mapping(columns):
     cols_norm = {c: norm(c) for c in columns}
@@ -131,7 +139,7 @@ def run_mapping_wizard(columns):
             mapping["use_seller_col"] = True
             mapping["seller_col"] = suggested["seller_col"]
 
-    notes_cfg = []  # laissé vide ici: notes wizard plus tard
+    notes_cfg = []
     return mapping, notes_cfg
 
 
