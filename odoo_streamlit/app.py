@@ -13,7 +13,6 @@ from odoo_import.commercial_wizard import (
     build_vals_from_answers,
     detect_existing_lead,
     read_lead_summary,
-    validate_date,
     validate_email,
     validate_phone,
     ensure_minimum_contact,
@@ -50,12 +49,10 @@ def _init_state():
             "phone": "",
             "mobile": "",
             "email_from": "",
-            "website": "",
             "street": "",
             "street2": "",
             "zip": "",
             "city": "",
-            "date_deadline": "",
             "current_equipment": "",
             "free_comment": "",
         },
@@ -84,12 +81,10 @@ def reset_all():
         "phone": "",
         "mobile": "",
         "email_from": "",
-        "website": "",
         "street": "",
         "street2": "",
         "zip": "",
         "city": "",
-        "date_deadline": "",
         "current_equipment": "",
         "free_comment": "",
     }
@@ -111,22 +106,16 @@ def validate_form(raw_data):
     if not ok:
         errors.append(msg)
 
-    ok, msg, date_deadline = validate_date(raw_data.get("date_deadline", ""))
-    if not ok:
-        errors.append(msg)
-
     data = {
         "partner_name": (raw_data.get("partner_name") or "").strip(),
         "contact_name": (raw_data.get("contact_name") or "").strip(),
         "phone": phone,
         "mobile": mobile,
         "email_from": email_from,
-        "website": (raw_data.get("website") or "").strip(),
         "street": (raw_data.get("street") or "").strip(),
         "street2": (raw_data.get("street2") or "").strip(),
         "zip": (raw_data.get("zip") or "").strip(),
         "city": (raw_data.get("city") or "").strip(),
-        "date_deadline": date_deadline,
         "current_equipment": (raw_data.get("current_equipment") or "").strip(),
         "free_comment": (raw_data.get("free_comment") or "").strip(),
     }
@@ -194,12 +183,10 @@ def show_preview(preview_vals, raw_data, seller_name):
     st.write(f"**Téléphone :** {raw_data.get('phone') or '-'}")
     st.write(f"**Mobile :** {raw_data.get('mobile') or '-'}")
     st.write(f"**Email :** {raw_data.get('email_from') or '-'}")
-    st.write(f"**Site web :** {raw_data.get('website') or '-'}")
     st.write(f"**Adresse :** {raw_data.get('street') or '-'}")
     st.write(f"**Complément :** {raw_data.get('street2') or '-'}")
     st.write(f"**Code postal :** {raw_data.get('zip') or '-'}")
     st.write(f"**Ville :** {raw_data.get('city') or '-'}")
-    st.write(f"**Date de clôture :** {raw_data.get('date_deadline') or '-'}")
     st.write(f"**Équipement actuel :** {raw_data.get('current_equipment') or '-'}")
     st.write(f"**Commentaire libre :** {raw_data.get('free_comment') or '-'}")
     if preview_vals.get("description"):
@@ -264,14 +251,12 @@ with st.form("lead_form"):
     phone_raw = st.text_input("Téléphone", value=st.session_state["form_data"]["phone"])
     mobile_raw = st.text_input("Mobile", value=st.session_state["form_data"]["mobile"])
     email_raw = st.text_input("Email", value=st.session_state["form_data"]["email_from"])
-    website = st.text_input("Site web", value=st.session_state["form_data"]["website"])
 
     st.subheader("Adresse")
     street = st.text_input("Adresse", value=st.session_state["form_data"]["street"])
     street2 = st.text_input("Complément d'adresse", value=st.session_state["form_data"]["street2"])
     zip_code = st.text_input("Code postal", value=st.session_state["form_data"]["zip"])
     city = st.text_input("Ville", value=st.session_state["form_data"]["city"])
-    date_deadline_raw = st.text_input("Date de clôture prévue", value=st.session_state["form_data"]["date_deadline"], help="Formats acceptés : JJ/MM/AAAA, AAAA-MM-JJ, 7j, 15j, 30j")
 
     st.subheader("Notes")
     current_equipment = st.text_area("Équipement actuel", value=st.session_state["form_data"]["current_equipment"])
@@ -286,12 +271,10 @@ if submitted:
         "phone": phone_raw,
         "mobile": mobile_raw,
         "email_from": email_raw,
-        "website": website,
         "street": street,
         "street2": street2,
         "zip": zip_code,
         "city": city,
-        "date_deadline": date_deadline_raw,
         "current_equipment": current_equipment,
         "free_comment": free_comment,
     }
