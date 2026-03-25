@@ -21,26 +21,24 @@ def norm(s: str) -> str:
 
 
 SUGGESTIONS = {
-    "name": ["societe","raisonsociale","enseigne","nom","client","prospect","entreprise","etablissement","company","lead"],
-    "tag_ids": ["etiquette","etiquettes","tag","tags","source","origine","evenement","salon","campagne","labels"],
-    "seller_col": ["vendeur","commercial","sales","owner","assigne","attribue","responsable"],
-    "partner_name": ["societe","raisonsociale","enseigne","entreprise","company"],
-    "contact_name": ["contact","interlocuteur","nomcontact","responsable"],
-    "email_from": ["email","e-mail","mail","courriel"],
-    "phone": ["tel","telephone","téléphone","fixe","phone"],
-    "mobile": ["mobile","gsm","portable","cell"],
-    "website": ["site","siteweb","url","website"],
-    "street": ["adresse","adresse1","rue","street","address"],
-    "street2": ["adresse2","complement","address2"],
-    "zip": ["cp","codepostal","postal","zip"],
-    "city": ["ville","commune","city"],
-    "country_id": ["pays","country"],
-    "date_deadline": ["echeance","deadline","cloture"],
+    "name": ["societe", "raisonsociale", "enseigne", "nom", "client", "prospect", "entreprise", "etablissement", "company", "lead"],
+    "tag_ids": ["etiquette", "etiquettes", "tag", "tags", "source", "origine", "evenement", "salon", "campagne", "labels"],
+    "seller_col": ["vendeur", "commercial", "sales", "owner", "assigne", "attribue", "responsable"],
+    "partner_name": ["societe", "raisonsociale", "enseigne", "entreprise", "company"],
+    "contact_name": ["contact", "interlocuteur", "nomcontact", "responsable"],
+    "email_from": ["email", "e-mail", "mail", "courriel"],
+    "phone": ["tel", "telephone", "téléphone", "fixe", "phone"],
+    "mobile": ["mobile", "gsm", "portable", "cell"],
+    "street": ["adresse", "adresse1", "rue", "street", "address"],
+    "street2": ["adresse2", "complement", "address2"],
+    "zip": ["cp", "codepostal", "postal", "zip"],
+    "city": ["ville", "commune", "city"],
+    "country_id": ["pays", "country"],
 }
 
 NOTE_HINTS = set(map(norm, [
-    "commentaire","commentaires","notes","note","remarque","infos","besoin",
-    "comment","comments","details","need","interest"
+    "commentaire", "commentaires", "notes", "note", "remarque", "infos", "besoin",
+    "comment", "comments", "details", "need", "interest"
 ]))
 
 
@@ -112,13 +110,11 @@ def run_mapping_wizard(columns):
         ("email_from", "Email"),
         ("phone", "Téléphone"),
         ("mobile", "Mobile"),
-        ("website", "Site web"),
         ("street", "Adresse (ligne 1)"),
         ("street2", "Adresse (ligne 2)"),
         ("zip", "Code postal"),
         ("city", "Ville"),
         ("country_id", "Pays"),
-        ("date_deadline", "Date de clôture prévue"),
     ]
 
     print(H("\n📌 Mapping des champs commerciaux (facultatifs)"))
@@ -160,7 +156,7 @@ def notes_wizard(columns, note_cols):
 
     while True:
         raw = input("> ").strip()
-        if raw in ("1","2","3"):
+        if raw in ("1", "2", "3"):
             break
         print(WARN("Choix invalide (1/2/3)."))
 
@@ -241,13 +237,11 @@ def preview_row_full(df, row_idx, mapping, notes_cfg, seller_name=None):
         "email_from": "Email",
         "phone": "Téléphone",
         "mobile": "Mobile",
-        "website": "Site web",
         "street": "Adresse 1",
         "street2": "Adresse 2",
         "zip": "Code postal",
         "city": "Ville",
         "country_id": "Pays",
-        "date_deadline": "Échéance",
     }
 
     for f, lab in field_labels.items():

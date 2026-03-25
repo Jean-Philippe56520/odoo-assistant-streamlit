@@ -1,6 +1,6 @@
 import re
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from .config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
 from .console_utils import H, OK, WARN, ERR, DIM
@@ -51,30 +51,6 @@ def validate_phone(value):
     if len(digits) < 8:
         return False, "Téléphone trop court.", None
     return True, None, phone
-
-
-def validate_date(value):
-    raw = normalize_text(value)
-    if not raw:
-        return True, None, ""
-
-    shortcuts = {
-        "7j": 7,
-        "15j": 15,
-        "30j": 30,
-    }
-    lower = raw.lower()
-    if lower in shortcuts:
-        dt = datetime.today().date()
-        return True, None, (dt + timedelta(days=shortcuts[lower])).strftime("%Y-%m-%d")
-
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
-        try:
-            dt = datetime.strptime(raw, fmt)
-            return True, None, dt.strftime("%Y-%m-%d")
-        except ValueError:
-            pass
-    return False, "Date invalide. Formats acceptés : JJ/MM/AAAA, AAAA-MM-JJ, 7j, 15j, 30j.", None
 
 
 def ask_text(label, required=False, default=None, validator=None):
@@ -209,12 +185,10 @@ def build_vals_from_answers(answers, team_id, seller_user_id, replace_tags=True,
         "email_from",
         "phone",
         "mobile",
-        "website",
         "street",
         "street2",
         "zip",
         "city",
-        "date_deadline",
     ):
         value = normalize_text(answers.get(field))
         if value:
@@ -248,12 +222,10 @@ def preview_answers(vals, seller_name):
         "email_from": "Email",
         "phone": "Téléphone",
         "mobile": "Mobile",
-        "website": "Site web",
         "street": "Adresse 1",
         "street2": "Adresse 2",
         "zip": "Code postal",
         "city": "Ville",
-        "date_deadline": "Date de clôture prévue",
         "description": "Notes",
     }
     for key, label in labels.items():
@@ -371,12 +343,10 @@ FIELD_ORDER = [
     ("phone", "Téléphone", False, validate_phone),
     ("mobile", "Mobile", False, validate_phone),
     ("email_from", "Email", False, validate_email),
-    ("website", "Site web", False, None),
     ("street", "Adresse", False, None),
     ("street2", "Complément d'adresse", False, None),
     ("zip", "Code postal", False, None),
     ("city", "Ville", False, None),
-    ("date_deadline", "Date de clôture prévue", False, validate_date),
     ("current_equipment", "Équipement actuel", False, None),
     ("free_comment", "Commentaire libre", False, None),
 ]
@@ -395,14 +365,12 @@ def ask_commercial_answers():
         answers["phone"] = ask_text("Téléphone", validator=validate_phone)
         answers["mobile"] = ask_text("Mobile", validator=validate_phone)
         answers["email_from"] = ask_text("Email", validator=validate_email)
-        answers["website"] = ask_text("Site web")
 
         print(H("\nÉtape 2/3 — Adresse"))
         answers["street"] = ask_text("Adresse")
         answers["street2"] = ask_text("Complément d'adresse")
         answers["zip"] = ask_text("Code postal")
         answers["city"] = ask_text("Ville")
-        answers["date_deadline"] = ask_text("Date de clôture prévue", validator=validate_date)
 
         print(H("\nÉtape 3/3 — Notes utiles"))
         answers["current_equipment"] = ask_text("Équipement actuel")

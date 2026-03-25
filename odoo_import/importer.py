@@ -55,8 +55,8 @@ def build_vals_from_row(row, mapping, notes_cfg, models, uid, team_id, default_s
     vals = {}
     vals["name"] = str(row.get(mapping["name"], "")).strip() or "Piste sans nom"
 
-    for f in ("partner_name","contact_name","email_from","phone","mobile","website",
-              "street","street2","zip","city","country_id","date_deadline"):
+    for f in ("partner_name", "contact_name", "email_from", "phone", "mobile",
+              "street", "street2", "zip", "city", "country_id"):
         col = mapping.get(f)
         if col:
             v = row.get(col)
@@ -136,7 +136,7 @@ def run_import():
 
     print_preview_block("🧾 PREVIEW 2 (finale)", df, mapping, notes_cfg)
 
-    if input("\n🚀 On lance l’import final ? [O/n] ").strip().lower() in ("n","non","no"):
+    if input("\n🚀 On lance l’import final ? [O/n] ").strip().lower() in ("n", "non", "no"):
         print(WARN("Import annulé."))
         return
 
