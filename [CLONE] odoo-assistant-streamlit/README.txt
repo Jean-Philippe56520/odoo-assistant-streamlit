@@ -1,1 +1,0 @@
-streamlit run odoo_streamlit/app.py
