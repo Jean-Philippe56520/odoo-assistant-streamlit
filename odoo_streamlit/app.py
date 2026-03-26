@@ -14,14 +14,13 @@ from odoo_import.lead_service import (
     prepare_lead_preview,
     validate_lead_data,
     add_audit_trail,
+    create_new_lead,
+    update_existing_lead,
 )
-from odoo_import.config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
 from odoo_import.odoo_client import (
     odoo_connect,
     find_team_ventes,
     get_active_sales_users,
-    create_lead_record,
-    update_lead_record,
 )
 from odoo_streamlit.auth import require_simple_auth, render_logout
 
@@ -177,12 +176,14 @@ def show_preview(preview_vals, raw_data, seller_name):
 
 def create_lead(vals):
     uid, models = get_odoo()
-    return create_lead_record(models, uid, vals)
+    result = create_new_lead(models, uid, vals)
+    return result.lead_id
 
 
 def update_lead(lead_id, vals):
     uid, models = get_odoo()
-    return update_lead_record(models, uid, lead_id, vals)
+    result = update_existing_lead(models, uid, lead_id, vals)
+    return result.lead_id
 
 
 require_simple_auth()
