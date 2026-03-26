@@ -1,3 +1,4 @@
+import re
 import xmlrpc.client
 
 try:
@@ -95,39 +96,116 @@ def get_active_sales_users(models, uid):
     )
 
 
-def lead_exists(models, uid, email, phone, mobile=None):
-    """
-    Doublon fiable sur coordonnées uniquement.
-    GARDE-FOU : si aucun critère => False (jamais de search([])).
-    OR email/phone/mobile.
-    """
-    email = (email or "").strip()
-    phone = (phone or "").strip()
-    mobile = (mobile or "").strip()
+def _digits_only(value):
+    return re.sub(r"\D", "", str(value or ""))
 
-    if not (email or phone or mobile):
-        return False
 
-    terms = []
+def _clean_text(value):
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _build_reason(field, label, reason_type):
+    return {"field": field, "label": label, "type": reason_type}
+
+
+def lead_exists(models, uid, email=None, phone=None, mobile=None, company=None, city=None, zip_code=None):
+    """
+    Retourne un dictionnaire décrivant le lead suspect détecté, ou False.
+    Priorité :
+    1. email / téléphone / mobile exacts
+    2. société + ville
+    3. société + code postal
+    """
+    email = _clean_text(email)
+    phone = _digits_only(phone)
+    mobile = _digits_only(mobile)
+    company = _clean_text(company)
+    city = _clean_text(city)
+    zip_code = _digits_only(zip_code)
+
+    strong_terms = []
     if email:
-        terms.append(("email_from", "=", email))
+        strong_terms.append(("email_from", "=", email))
     if phone:
-        terms.append(("phone", "=", phone))
+        strong_terms.append(("phone", "=", phone))
     if mobile:
-        terms.append(("mobile", "=", mobile))
+        strong_terms.append(("mobile", "=", mobile))
 
-    if len(terms) == 1:
-        domain = terms
-    else:
-        domain = ["|"] * (len(terms) - 1) + terms
+    if strong_terms:
+        strong_domain = strong_terms if len(strong_terms) == 1 else ["|"] * (len(strong_terms) - 1) + strong_terms
+        rows = models.execute_kw(
+            ODOO_DB,
+            uid,
+            ODOO_API_KEY,
+            LEAD_MODEL,
+            "search_read",
+            [strong_domain],
+            {
+                "fields": ["id", "email_from", "phone", "mobile", "partner_name", "city", "zip"],
+                "limit": 5,
+            },
+        )
+        for row in rows:
+            reasons = []
+            if email and _clean_text(row.get("email_from")) == email:
+                reasons.append(_build_reason("email_from", "Email", "email_exact"))
+            if phone and _digits_only(row.get("phone")) == phone:
+                reasons.append(_build_reason("phone", "Téléphone", "phone_exact"))
+            if mobile and _digits_only(row.get("mobile")) == mobile:
+                reasons.append(_build_reason("mobile", "Mobile", "mobile_exact"))
+            if reasons:
+                return {
+                    "lead_id": row["id"],
+                    "match_level": "strong",
+                    "reasons": reasons,
+                }
 
-    ids = models.execute_kw(
-        ODOO_DB,
-        uid,
-        ODOO_API_KEY,
-        LEAD_MODEL,
-        "search",
-        [domain],
-        {"limit": 1},
-    )
-    return ids[0] if ids else False
+    if company and (city or zip_code):
+        soft_domain = [("partner_name", "=", company)]
+        if city and zip_code:
+            soft_domain += ["|", ("city", "=", city), ("zip", "=", zip_code)]
+        elif city:
+            soft_domain.append(("city", "=", city))
+        elif zip_code:
+            soft_domain.append(("zip", "=", zip_code))
+
+        rows = models.execute_kw(
+            ODOO_DB,
+            uid,
+            ODOO_API_KEY,
+            LEAD_MODEL,
+            "search_read",
+            [soft_domain],
+            {
+                "fields": ["id", "partner_name", "city", "zip"],
+                "limit": 5,
+            },
+        )
+        for row in rows:
+            row_company = _clean_text(row.get("partner_name"))
+            row_city = _clean_text(row.get("city"))
+            row_zip = _digits_only(row.get("zip"))
+            reasons = []
+
+            if row_company != company:
+                continue
+
+            if city and row_city == city:
+                reasons.extend([
+                    _build_reason("partner_name", "Société", "company_city"),
+                    _build_reason("city", "Ville", "company_city"),
+                ])
+            elif zip_code and row_zip == zip_code:
+                reasons.extend([
+                    _build_reason("partner_name", "Société", "company_zip"),
+                    _build_reason("zip", "Code postal", "company_zip"),
+                ])
+
+            if reasons:
+                return {
+                    "lead_id": row["id"],
+                    "match_level": "soft",
+                    "reasons": reasons,
+                }
+
+    return False
