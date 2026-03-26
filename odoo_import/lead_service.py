@@ -3,25 +3,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-try:
-    from .config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
-    from .odoo_client import (
-        find_or_create_tag,
-        lead_exists,
-        read_lead,
-        create_lead_record,
-        update_lead_record,
-    )
-except ImportError:
-    from config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
-    from odoo_client import (
-        find_or_create_tag,
-        lead_exists,
-        read_lead,
-        create_lead_record,
-        update_lead_record,
-    )
-
+from .odoo_client import (
+    find_or_create_tag,
+    lead_exists,
+    read_lead,
+    create_lead_record,
+    update_lead_record,
+)
 
 PROSPECTION_TAG = "Prospection"
 
@@ -99,16 +87,16 @@ def ensure_minimum_contact(data):
 
 
 def normalize_form_data(raw_data: dict) -> dict:
-    ok, _, phone = validate_phone(raw_data.get("phone", ""))
-    ok, _, mobile = validate_phone(raw_data.get("mobile", ""))
-    ok, _, email_from = validate_email(raw_data.get("email_from", ""))
+    phone_ok, _, phone = validate_phone(raw_data.get("phone", ""))
+    mobile_ok, _, mobile = validate_phone(raw_data.get("mobile", ""))
+    email_ok, _, email_from = validate_email(raw_data.get("email_from", ""))
 
     return {
         "partner_name": normalize_text(raw_data.get("partner_name")),
         "contact_name": normalize_text(raw_data.get("contact_name")),
-        "phone": phone,
-        "mobile": mobile,
-        "email_from": email_from,
+        "phone": phone if phone_ok else normalize_text(raw_data.get("phone")),
+        "mobile": mobile if mobile_ok else normalize_text(raw_data.get("mobile")),
+        "email_from": email_from if email_ok else normalize_text(raw_data.get("email_from")),
         "street": normalize_text(raw_data.get("street")),
         "street2": normalize_text(raw_data.get("street2")),
         "zip": normalize_text(raw_data.get("zip")),
@@ -136,9 +124,9 @@ def validate_lead_data(raw_data: dict) -> ValidationResult:
     data = {
         "partner_name": normalize_text(raw_data.get("partner_name")),
         "contact_name": normalize_text(raw_data.get("contact_name")),
-        "phone": phone,
-        "mobile": mobile,
-        "email_from": email_from,
+        "phone": phone if phone is not None else "",
+        "mobile": mobile if mobile is not None else "",
+        "email_from": email_from if email_from is not None else "",
         "street": normalize_text(raw_data.get("street")),
         "street2": normalize_text(raw_data.get("street2")),
         "zip": normalize_text(raw_data.get("zip")),
@@ -219,6 +207,9 @@ def add_audit_trail(vals, actor_user=None, seller_name=None, mode=None):
 
 
 def build_vals_from_answers(data, team_id, seller_user_id, replace_tags=True, existing_description=None):
+    models = data.get("_models")
+    uid = data.get("_uid")
+
     vals = {
         "name": build_title(data),
         "user_id": seller_user_id,
@@ -250,8 +241,9 @@ def build_vals_from_answers(data, team_id, seller_user_id, replace_tags=True, ex
     if description:
         vals["description"] = description
 
-    tag_id = find_or_create_tag(data["_models"], data["_uid"], PROSPECTION_TAG)
-    vals["tag_ids"] = [(6, 0, [tag_id])] if replace_tags else [(4, tag_id)]
+    if models is not None and uid is not None:
+        tag_id = find_or_create_tag(models, uid, PROSPECTION_TAG)
+        vals["tag_ids"] = [(6, 0, [tag_id])] if replace_tags else [(4, tag_id)]
 
     return vals
 
