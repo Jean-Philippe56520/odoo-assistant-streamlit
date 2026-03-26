@@ -1,56 +1,20 @@
-import re
 import sys
-from datetime import datetime
 
-from .config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
+from .config import ODOO_API_KEY
 from .console_utils import H, OK, WARN, ERR, DIM
-from .odoo_client import (
-    odoo_connect,
-    find_team_ventes,
-    get_active_sales_users,
-    lead_exists,
-    find_or_create_tag,
+from .odoo_client import odoo_connect, find_team_ventes, get_active_sales_users
+from .lead_service import (
+    PROSPECTION_TAG,
+    validate_email,
+    validate_phone,
+    ensure_minimum_contact,
+    normalize_text,
+    prepare_lead_preview,
+    build_vals_from_answers,
+    read_lead_summary,
+    create_new_lead,
+    update_existing_lead,
 )
-
-PROSPECTION_TAG = "Prospection"
-
-
-def normalize_text(value):
-    return str(value or "").strip()
-
-
-def normalize_email(value):
-    return normalize_text(value).lower()
-
-
-def normalize_phone(value):
-    raw = normalize_text(value)
-    if not raw:
-        return ""
-    return re.sub(r"\s+", " ", raw)
-
-
-def comparable_phone(value):
-    return re.sub(r"\D", "", normalize_text(value))
-
-
-def validate_email(value):
-    email = normalize_email(value)
-    if not email:
-        return True, None, ""
-    if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-        return True, None, email
-    return False, "Email invalide.", None
-
-
-def validate_phone(value):
-    phone = normalize_phone(value)
-    if not phone:
-        return True, None, ""
-    digits = comparable_phone(phone)
-    if len(digits) < 8:
-        return False, "Téléphone trop court.", None
-    return True, None, phone
 
 
 def ask_text(label, required=False, default=None, validator=None):
@@ -130,87 +94,6 @@ def confirm_duplicate_action(choice):
     return True
 
 
-def build_title(answers):
-    company = normalize_text(answers.get("partner_name"))
-    contact = normalize_text(answers.get("contact_name"))
-
-    if company and contact:
-        return f"{company} - {contact}"
-    if company:
-        return f"Prospection - {company}"
-    return "Piste sans nom"
-
-
-def build_new_note_block(answers):
-    parts = []
-    stamp = datetime.now().strftime("%d/%m/%Y %H:%M")
-    parts.append(f"--- Saisie prospection du {stamp} ---")
-
-    current_equipment = normalize_text(answers.get("current_equipment"))
-    if current_equipment:
-        parts.append(f"📌 Équipement actuel\n{current_equipment}")
-
-    free_comment = normalize_text(answers.get("free_comment"))
-    if free_comment:
-        parts.append(f"📌 Commentaire libre\n{free_comment}")
-
-    return "\n\n".join(parts)
-
-
-def build_description_for_create(answers):
-    block = build_new_note_block(answers)
-    return block if block.strip() else ""
-
-
-def merge_descriptions(existing_description, answers):
-    new_block = build_new_note_block(answers).strip()
-    old = normalize_text(existing_description)
-
-    if old and new_block:
-        return f"{old}\n\n{new_block}"
-    if new_block:
-        return new_block
-    return old
-
-
-def build_vals_from_answers(answers, team_id, seller_user_id, replace_tags=True, existing_description=None):
-    vals = {
-        "name": build_title(answers),
-        "user_id": seller_user_id,
-    }
-
-    for field in (
-        "partner_name",
-        "contact_name",
-        "email_from",
-        "phone",
-        "mobile",
-        "street",
-        "street2",
-        "zip",
-        "city",
-    ):
-        value = normalize_text(answers.get(field))
-        if value:
-            vals[field] = value
-
-    if team_id:
-        vals["team_id"] = team_id
-
-    if replace_tags:
-        description = build_description_for_create(answers)
-    else:
-        description = merge_descriptions(existing_description, answers)
-
-    if description:
-        vals["description"] = description
-
-    tag_id = find_or_create_tag(answers["_models"], answers["_uid"], PROSPECTION_TAG)
-    vals["tag_ids"] = [(6, 0, [tag_id])] if replace_tags else [(4, tag_id)]
-
-    return vals
-
-
 def preview_answers(vals, seller_name):
     print(H("\n🧾 Prévisualisation de la piste"))
     print(f"  • Vendeur confirmé: {seller_name}")
@@ -267,74 +150,6 @@ def choose_confirmed_seller(uid, models):
         if not ask_yes_no("Veux-tu choisir un autre vendeur ?", default_yes=True):
             print(WARN("Identification annulée."))
             sys.exit(0)
-
-
-def detect_existing_lead(models, uid, answers):
-    email = normalize_email(answers.get("email_from"))
-    phone = normalize_phone(answers.get("phone"))
-    mobile = normalize_phone(answers.get("mobile"))
-    return lead_exists(models, uid, email, phone, mobile)
-
-
-def read_lead_summary(models, uid, lead_id):
-    try:
-        rows = models.execute_kw(
-            ODOO_DB,
-            uid,
-            ODOO_API_KEY,
-            LEAD_MODEL,
-            "read",
-            [[lead_id]],
-            {
-                "fields": [
-                    "name",
-                    "partner_name",
-                    "contact_name",
-                    "email_from",
-                    "phone",
-                    "mobile",
-                    "user_id",
-                    "description",
-                ]
-            },
-        )
-        return rows[0] if rows else None
-    except Exception:
-        return None
-
-
-def show_existing_lead_summary(existing_data):
-    if not existing_data:
-        print(WARN("Impossible de lire le détail du lead existant."))
-        return
-
-    print(H("\n🔎 Lead déjà détecté"))
-    seller = ""
-    user_id = existing_data.get("user_id")
-    if isinstance(user_id, list) and len(user_id) >= 2:
-        seller = user_id[1]
-
-    mapping = {
-        "name": "Titre",
-        "partner_name": "Société",
-        "contact_name": "Contact",
-        "email_from": "Email",
-        "phone": "Téléphone",
-        "mobile": "Mobile",
-    }
-    for key, label in mapping.items():
-        value = normalize_text(existing_data.get(key))
-        if value:
-            print(f"  • {label}: {value}")
-    if seller:
-        print(f"  • Vendeur actuel: {seller}")
-
-
-def ensure_minimum_contact(answers):
-    if any(normalize_text(answers.get(k)) for k in ("phone", "mobile", "email_from")):
-        return True
-    print(WARN("Il faut au moins un moyen de contact : téléphone, mobile ou email."))
-    return False
 
 
 FIELD_ORDER = [
@@ -420,41 +235,72 @@ def edit_answers_loop(answers):
         answers[key] = ask_text(label, required=required, default=current, validator=validator)
 
 
+def show_existing_lead_summary(existing_data):
+    if not existing_data:
+        print(WARN("Impossible de lire le détail du lead existant."))
+        return
+
+    print(H("\n🔎 Lead déjà détecté"))
+    seller = ""
+    user_id = existing_data.get("user_id")
+    if isinstance(user_id, list) and len(user_id) >= 2:
+        seller = user_id[1]
+
+    mapping = {
+        "name": "Titre",
+        "partner_name": "Société",
+        "contact_name": "Contact",
+        "email_from": "Email",
+        "phone": "Téléphone",
+        "mobile": "Mobile",
+    }
+    for key, label in mapping.items():
+        value = normalize_text(existing_data.get(key))
+        if value:
+            print(f"  • {label}: {value}")
+    if seller:
+        print(f"  • Vendeur actuel: {seller}")
+
+
 def run_single_capture(uid, models, team_id, seller_user_id, seller_name):
     answers = ask_commercial_answers()
 
     while True:
         answers = edit_answers_loop(answers)
-        answers["_uid"] = uid
-        answers["_models"] = models
 
-        existing = detect_existing_lead(models, uid, answers)
-        existing_data = read_lead_summary(models, uid, existing) if existing else None
-
-        replace_tags = existing is None
-        existing_description = existing_data.get("description") if existing_data else None
-        vals = build_vals_from_answers(
-            answers,
-            team_id,
-            seller_user_id,
-            replace_tags=replace_tags,
-            existing_description=existing_description,
+        preview = prepare_lead_preview(
+            uid=uid,
+            models=models,
+            raw_data=answers,
+            team_id=team_id,
+            seller_user_id=seller_user_id,
+            seller_name=None,
+            actor_user=None,
+            audit_mode=None,
         )
 
-        preview_answers(vals, seller_name)
+        if not preview.is_valid:
+            for error in preview.errors:
+                print(WARN(error))
+            continue
 
-        if not existing:
+        preview_answers(preview.vals, seller_name)
+
+        if not preview.existing_match:
             if not ask_yes_no("Confirmer la création de cette piste dans Odoo ?", default_yes=False):
                 if ask_yes_no("Revenir à la correction ?", default_yes=True):
                     continue
                 print(WARN("Création annulée."))
                 return
 
-            lead_id = models.execute_kw(ODOO_DB, uid, ODOO_API_KEY, LEAD_MODEL, "create", [vals])
-            print(OK(f"\n✅ Piste créée dans Odoo (ID {lead_id})"))
+            result = create_new_lead(models, uid, preview.vals)
+            print(OK(f"\n✅ {result.message}"))
             return
 
-        print(WARN(f"\n⚠️ Un lead similaire existe déjà (ID {existing})."))
+        existing_id = preview.existing_match.lead_id
+        existing_data = preview.existing_match.summary
+
+        print(WARN(f"\n⚠️ Un lead similaire existe déjà (ID {existing_id})."))
         print(DIM("Vous pouvez le mettre à jour, créer une nouvelle piste, revenir à la correction ou annuler."))
         show_existing_lead_summary(existing_data)
 
@@ -473,34 +319,20 @@ def run_single_capture(uid, models, team_id, seller_user_id, seller_name):
                 return
 
             if action == "1":
-                models.execute_kw(
-                    ODOO_DB,
-                    uid,
-                    ODOO_API_KEY,
-                    LEAD_MODEL,
-                    "write",
-                    [[existing], vals],
-                )
-                print(OK(f"\n✅ Piste mise à jour (ID {existing})"))
+                result = update_existing_lead(models, uid, existing_id, preview.vals)
+                print(OK(f"\n✅ {result.message}"))
                 return
 
             if action == "2":
                 create_vals = build_vals_from_answers(
-                    answers,
+                    preview.cleaned_data,
                     team_id,
                     seller_user_id,
                     replace_tags=True,
                     existing_description=None,
                 )
-                lead_id = models.execute_kw(
-                    ODOO_DB,
-                    uid,
-                    ODOO_API_KEY,
-                    LEAD_MODEL,
-                    "create",
-                    [create_vals],
-                )
-                print(OK(f"\n✅ Nouvelle piste créée dans Odoo (ID {lead_id})"))
+                result = create_new_lead(models, uid, create_vals)
+                print(OK(f"\n✅ {result.message}"))
                 return
 
             if action == "4":

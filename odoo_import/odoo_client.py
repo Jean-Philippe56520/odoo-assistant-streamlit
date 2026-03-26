@@ -131,3 +131,47 @@ def lead_exists(models, uid, email, phone, mobile=None):
         {"limit": 1},
     )
     return ids[0] if ids else False
+
+
+def read_lead(models, uid, lead_id, fields=None):
+    fields = fields or [
+        "name",
+        "partner_name",
+        "contact_name",
+        "email_from",
+        "phone",
+        "mobile",
+        "user_id",
+        "description",
+    ]
+    return models.execute_kw(
+        ODOO_DB,
+        uid,
+        ODOO_API_KEY,
+        LEAD_MODEL,
+        "read",
+        [[lead_id]],
+        {"fields": fields},
+    )
+
+
+def create_lead_record(models, uid, vals):
+    return models.execute_kw(
+        ODOO_DB,
+        uid,
+        ODOO_API_KEY,
+        LEAD_MODEL,
+        "create",
+        [vals],
+    )
+
+
+def update_lead_record(models, uid, lead_id, vals):
+    return models.execute_kw(
+        ODOO_DB,
+        uid,
+        ODOO_API_KEY,
+        LEAD_MODEL,
+        "write",
+        [[lead_id], vals],
+    )
