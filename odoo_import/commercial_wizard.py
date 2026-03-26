@@ -11,7 +11,6 @@ from .lead_service import (
     normalize_text,
     prepare_lead_preview,
     build_vals_from_answers,
-    read_lead_summary,
     create_new_lead,
     update_existing_lead,
 )
