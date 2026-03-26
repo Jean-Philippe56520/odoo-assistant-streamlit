@@ -1,5 +1,4 @@
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -8,18 +7,22 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
-from odoo_import.commercial_wizard import (
+from odoo_import.lead_service import (
     PROSPECTION_TAG,
     build_title,
     build_vals_from_answers,
-    detect_existing_lead,
-    read_lead_summary,
-    validate_email,
-    validate_phone,
-    ensure_minimum_contact,
+    prepare_lead_preview,
+    validate_lead_data,
+    add_audit_trail,
 )
 from odoo_import.config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
-from odoo_import.odoo_client import odoo_connect, find_team_ventes, get_active_sales_users
+from odoo_import.odoo_client import (
+    odoo_connect,
+    find_team_ventes,
+    get_active_sales_users,
+    create_lead_record,
+    update_lead_record,
+)
 from odoo_streamlit.auth import require_simple_auth, render_logout
 
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
@@ -33,25 +36,6 @@ APP_STATE_KEYS = (
     "seller_name",
     "seller_user_id",
 )
-
-
-def add_audit_trail(vals, actor_user, seller_name, mode):
-    stamp = datetime.now().strftime("%d/%m/%Y %H:%M")
-    audit_block = (
-        f"--- Trace application ---\n"
-        f"Action : {mode}\n"
-        f"Compte connecté : {actor_user or '-'}\n"
-        f"Commercial sélectionné : {seller_name or '-'}\n"
-        f"Date : {stamp}"
-    )
-
-    current_description = (vals.get("description") or "").strip()
-    if current_description:
-        vals["description"] = f"{audit_block}\n\n{current_description}"
-    else:
-        vals["description"] = audit_block
-
-    return vals
 
 
 @st.cache_resource
@@ -123,72 +107,28 @@ def reset_all():
 
 
 def validate_form(raw_data):
-    errors = []
-
-    ok, msg, phone = validate_phone(raw_data.get("phone", ""))
-    if not ok:
-        errors.append(msg)
-
-    ok, msg, mobile = validate_phone(raw_data.get("mobile", ""))
-    if not ok:
-        errors.append(msg)
-
-    ok, msg, email_from = validate_email(raw_data.get("email_from", ""))
-    if not ok:
-        errors.append(msg)
-
-    data = {
-        "partner_name": (raw_data.get("partner_name") or "").strip(),
-        "contact_name": (raw_data.get("contact_name") or "").strip(),
-        "phone": phone,
-        "mobile": mobile,
-        "email_from": email_from,
-        "street": (raw_data.get("street") or "").strip(),
-        "street2": (raw_data.get("street2") or "").strip(),
-        "zip": (raw_data.get("zip") or "").strip(),
-        "city": (raw_data.get("city") or "").strip(),
-        "current_equipment": (raw_data.get("current_equipment") or "").strip(),
-        "free_comment": (raw_data.get("free_comment") or "").strip(),
-    }
-
-    if not data["partner_name"]:
-        errors.append("Le nom de l'entreprise est obligatoire.")
-
-    if not ensure_minimum_contact(data):
-        errors.append("Il faut au moins un moyen de contact : téléphone, mobile ou email.")
-
-    return errors, data
+    result = validate_lead_data(raw_data)
+    return result.errors, result.cleaned_data
 
 
 def compute_preview(data, seller_name, seller_user_id):
     uid, models = get_odoo()
-    work_data = dict(data)
-    work_data["_uid"] = uid
-    work_data["_models"] = models
-    work_data["_actor_user"] = st.session_state.get("auth_user", "")
 
-    existing_id = detect_existing_lead(models, uid, work_data)
-    existing_data = read_lead_summary(models, uid, existing_id) if existing_id else None
-
-    preview_vals = build_vals_from_answers(
-        work_data,
-        get_team_id(),
-        seller_user_id,
-        replace_tags=existing_id is None,
-        existing_description=existing_data.get("description") if existing_data else None,
-    )
-
-    preview_vals = add_audit_trail(
-        preview_vals,
-        actor_user=st.session_state.get("auth_user", ""),
+    preview = prepare_lead_preview(
+        uid=uid,
+        models=models,
+        raw_data=data,
+        team_id=get_team_id(),
+        seller_user_id=seller_user_id,
         seller_name=seller_name,
-        mode="prévisualisation",
+        actor_user=st.session_state.get("auth_user", ""),
+        audit_mode="prévisualisation",
     )
 
-    st.session_state["preview_data"] = work_data
-    st.session_state["preview_vals"] = preview_vals
-    st.session_state["existing_id"] = existing_id
-    st.session_state["existing_data"] = existing_data
+    st.session_state["preview_data"] = preview.cleaned_data
+    st.session_state["preview_vals"] = preview.vals
+    st.session_state["existing_id"] = preview.existing_match.lead_id if preview.existing_match else None
+    st.session_state["existing_data"] = preview.existing_match.summary if preview.existing_match else None
     st.session_state["seller_name"] = seller_name
     st.session_state["seller_user_id"] = seller_user_id
 
@@ -237,26 +177,12 @@ def show_preview(preview_vals, raw_data, seller_name):
 
 def create_lead(vals):
     uid, models = get_odoo()
-    return models.execute_kw(
-        ODOO_DB,
-        uid,
-        ODOO_API_KEY,
-        LEAD_MODEL,
-        "create",
-        [vals],
-    )
+    return create_lead_record(models, uid, vals)
 
 
 def update_lead(lead_id, vals):
     uid, models = get_odoo()
-    return models.execute_kw(
-        ODOO_DB,
-        uid,
-        ODOO_API_KEY,
-        LEAD_MODEL,
-        "write",
-        [[lead_id], vals],
-    )
+    return update_lead_record(models, uid, lead_id, vals)
 
 
 require_simple_auth()
