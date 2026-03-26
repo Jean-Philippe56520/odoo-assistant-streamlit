@@ -18,6 +18,7 @@ from odoo_import.commercial_wizard import (
     validate_email,
     validate_phone,
     ensure_minimum_contact,
+    format_duplicate_reasons,
 )
 from odoo_import.config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
 from odoo_import.odoo_client import odoo_connect, find_team_ventes, get_active_sales_users
@@ -145,6 +146,7 @@ def _init_state():
         "preview_vals": None,
         "existing_id": None,
         "existing_data": None,
+        "duplicate_info": None,
         "seller_name": None,
         "seller_user_id": None,
     }
@@ -154,7 +156,7 @@ def _init_state():
 
 
 def reset_preview_only():
-    for key in ("preview_data", "preview_vals", "existing_id", "existing_data", "seller_name", "seller_user_id"):
+    for key in ("preview_data", "preview_vals", "existing_id", "existing_data", "duplicate_info", "seller_name", "seller_user_id"):
         st.session_state[key] = None
 
 
@@ -221,7 +223,8 @@ def compute_preview(data, seller_name, seller_user_id):
     work_data["_models"] = models
     work_data["_actor_user"] = st.session_state.get("auth_user", "")
 
-    existing_id = detect_existing_lead(models, uid, work_data)
+    duplicate_info = detect_existing_lead(models, uid, work_data)
+    existing_id = duplicate_info["lead_id"] if duplicate_info else None
     existing_data = read_lead_summary(models, uid, existing_id) if existing_id else None
 
     preview_vals = build_vals_from_answers(
@@ -243,27 +246,37 @@ def compute_preview(data, seller_name, seller_user_id):
     st.session_state["preview_vals"] = preview_vals
     st.session_state["existing_id"] = existing_id
     st.session_state["existing_data"] = existing_data
+    st.session_state["duplicate_info"] = duplicate_info
     st.session_state["seller_name"] = seller_name
     st.session_state["seller_user_id"] = seller_user_id
 
 
-def show_existing(existing):
+def show_existing(existing, duplicate_info=None):
     st.markdown("### Lead détecté")
     if not existing:
         st.warning("Impossible de lire le détail du lead détecté.")
         return
+
+    matched_fields = {reason.get("field") for reason in (duplicate_info or {}).get("reasons", [])}
 
     seller = "-"
     user_id = existing.get("user_id")
     if isinstance(user_id, list) and len(user_id) >= 2:
         seller = user_id[1]
 
-    st.write(f"**Titre :** {existing.get('name') or '-'}")
-    st.write(f"**Société :** {existing.get('partner_name') or '-'}")
-    st.write(f"**Contact :** {existing.get('contact_name') or '-'}")
-    st.write(f"**Email :** {existing.get('email_from') or '-'}")
-    st.write(f"**Téléphone :** {existing.get('phone') or '-'}")
-    st.write(f"**Mobile :** {existing.get('mobile') or '-'}")
+    def render_value(label, field):
+        value = existing.get(field) or "-"
+        suffix = " ✅ correspondance" if field in matched_fields else ""
+        st.write(f"**{label} :** {value}{suffix}")
+
+    render_value("Titre", "name")
+    render_value("Société", "partner_name")
+    render_value("Contact", "contact_name")
+    render_value("Email", "email_from")
+    render_value("Téléphone", "phone")
+    render_value("Mobile", "mobile")
+    render_value("Code postal", "zip")
+    render_value("Ville", "city")
     st.write(f"**Vendeur actuel :** {seller}")
 
 
@@ -391,6 +404,8 @@ preview_data = st.session_state["preview_data"]
 preview_vals = st.session_state["preview_vals"]
 existing_id = st.session_state["existing_id"]
 existing_data = st.session_state["existing_data"]
+duplicate_info = st.session_state["duplicate_info"]
+duplicate_info = st.session_state["duplicate_info"]
 
 if preview_data and preview_vals:
     st.divider()
@@ -399,7 +414,14 @@ if preview_data and preview_vals:
     if existing_id:
         st.warning(f"Un lead similaire existe déjà (ID {existing_id}).")
         st.caption("Le système signale une similarité. Vous décidez ensuite de mettre à jour, créer quand même, ou annuler.")
-        show_existing(existing_data)
+
+        reason_messages = format_duplicate_reasons((duplicate_info or {}).get("reasons"))
+        if reason_messages:
+            st.markdown("**Motifs détectés :**")
+            for message in reason_messages:
+                st.write(f"- {message}")
+
+        show_existing(existing_data, duplicate_info)
 
         action = st.radio(
             "Choisissez une action",
