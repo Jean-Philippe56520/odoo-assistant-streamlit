@@ -3,13 +3,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from .odoo_client import (
-    find_or_create_tag,
-    lead_exists,
-    read_lead,
-    create_lead_record,
-    update_lead_record,
-)
+from .config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
+from .odoo_client import find_or_create_tag, lead_exists
+
 
 PROSPECTION_TAG = "Prospection"
 
@@ -215,7 +211,7 @@ def build_vals_from_answers(data, team_id, seller_user_id, replace_tags=True, ex
         "user_id": seller_user_id,
     }
 
-    for field in (
+    for field_name in (
         "partner_name",
         "contact_name",
         "email_from",
@@ -226,9 +222,9 @@ def build_vals_from_answers(data, team_id, seller_user_id, replace_tags=True, ex
         "zip",
         "city",
     ):
-        value = normalize_text(data.get(field))
+        value = normalize_text(data.get(field_name))
         if value:
-            vals[field] = value
+            vals[field_name] = value
 
     if team_id:
         vals["team_id"] = team_id
@@ -258,21 +254,27 @@ def detect_existing_lead(models, uid, data):
 def read_lead_summary(models, uid, lead_id):
     if not lead_id:
         return None
+
     try:
-        rows = read_lead(
-            models,
+        rows = models.execute_kw(
+            ODOO_DB,
             uid,
-            lead_id,
-            fields=[
-                "name",
-                "partner_name",
-                "contact_name",
-                "email_from",
-                "phone",
-                "mobile",
-                "user_id",
-                "description",
-            ],
+            ODOO_API_KEY,
+            LEAD_MODEL,
+            "read",
+            [[lead_id]],
+            {
+                "fields": [
+                    "name",
+                    "partner_name",
+                    "contact_name",
+                    "email_from",
+                    "phone",
+                    "mobile",
+                    "user_id",
+                    "description",
+                ]
+            },
         )
         return rows[0] if rows else None
     except Exception:
@@ -341,7 +343,14 @@ def prepare_lead_preview(
 
 
 def create_new_lead(models, uid, vals):
-    lead_id = create_lead_record(models, uid, vals)
+    lead_id = models.execute_kw(
+        ODOO_DB,
+        uid,
+        ODOO_API_KEY,
+        LEAD_MODEL,
+        "create",
+        [vals],
+    )
     return LeadActionResult(
         success=True,
         action="create",
@@ -351,7 +360,14 @@ def create_new_lead(models, uid, vals):
 
 
 def update_existing_lead(models, uid, lead_id, vals):
-    update_lead_record(models, uid, lead_id, vals)
+    models.execute_kw(
+        ODOO_DB,
+        uid,
+        ODOO_API_KEY,
+        LEAD_MODEL,
+        "write",
+        [[lead_id], vals],
+    )
     return LeadActionResult(
         success=True,
         action="update",
