@@ -1,4 +1,5 @@
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -41,14 +42,34 @@ def require_simple_auth():
     if "auth_user" not in st.session_state:
         st.session_state["auth_user"] = ""
 
+    if "cookie_bootstrap_done" not in st.session_state:
+        st.session_state["cookie_bootstrap_done"] = False
+
     expected_cookie_value = f"{username}:{cookie_key}"
-    existing_cookie = COOKIE_MANAGER.get(cookie_name)
+
+    # 1) Phase de bootstrap : on laisse le composant cookie se charger
+    if not st.session_state["cookie_bootstrap_done"]:
+        time.sleep(0.4)
+        cookies = COOKIE_MANAGER.get_all() or {}
+        existing_cookie = cookies.get(cookie_name)
+
+        if existing_cookie == expected_cookie_value:
+            st.session_state["authenticated"] = True
+            st.session_state["auth_user"] = username
+
+        st.session_state["cookie_bootstrap_done"] = True
+        st.rerun()
+
+    # 2) Lecture normale après bootstrap
+    cookies = COOKIE_MANAGER.get_all() or {}
+    existing_cookie = cookies.get(cookie_name)
 
     if existing_cookie == expected_cookie_value:
         st.session_state["authenticated"] = True
         st.session_state["auth_user"] = username
         return
 
+    # 3) Affichage du login si pas authentifié
     if not st.session_state["authenticated"]:
         st.title("Accès privé ABM")
         st.caption("Connexion requise pour accéder à l'application.")
@@ -68,6 +89,7 @@ def require_simple_auth():
                         expected_cookie_value,
                         expires_at=datetime.now() + timedelta(days=cookie_expiry_days),
                     )
+                    time.sleep(0.4)
 
                 st.rerun()
             else:
@@ -86,6 +108,7 @@ def render_logout():
             COOKIE_MANAGER.delete(cookie_name)
             st.session_state["authenticated"] = False
             st.session_state["auth_user"] = ""
+            st.session_state["cookie_bootstrap_done"] = False
             st.rerun()
 
 
