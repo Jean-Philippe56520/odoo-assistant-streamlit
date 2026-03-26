@@ -1,9 +1,8 @@
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
-import extra_streamlit_components as stx
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 if str(PROJECT_DIR) not in sys.path:
@@ -21,72 +20,19 @@ from odoo_import.commercial_wizard import (
 )
 from odoo_import.config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
 from odoo_import.odoo_client import odoo_connect, find_team_ventes, get_active_sales_users
+from odoo_streamlit.auth import require_simple_auth, render_logout
 
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
 
-# Une seule instance du composant cookie pour tout le script.
-COOKIE_MANAGER = stx.CookieManager(key="abm_cookie_manager")
-
-
-def require_simple_auth():
-    username = st.secrets["auth_simple"]["username"]
-    password = st.secrets["auth_simple"]["password"]
-    cookie_name = st.secrets["auth_simple"]["cookie_name"]
-    cookie_key = st.secrets["auth_simple"]["cookie_key"]
-    cookie_expiry_days = int(st.secrets["auth_simple"].get("cookie_expiry_days", 30))
-
-    if "authenticated" not in st.session_state:
-        st.session_state["authenticated"] = False
-
-    if "auth_user" not in st.session_state:
-        st.session_state["auth_user"] = ""
-
-    expected_cookie_value = f"{username}:{cookie_key}"
-    existing_cookie = COOKIE_MANAGER.get(cookie_name)
-
-    if existing_cookie == expected_cookie_value:
-        st.session_state["authenticated"] = True
-        st.session_state["auth_user"] = username
-        return
-
-    if not st.session_state["authenticated"]:
-        st.title("Accès privé ABM")
-        st.caption("Connexion requise pour accéder à l'application.")
-
-        input_user = st.text_input("Identifiant", key="login_username")
-        input_pass = st.text_input("Mot de passe", type="password", key="login_password")
-        remember_me = st.checkbox("Rester connecté 30 jours", value=True, key="login_remember_me")
-
-        if st.button("Se connecter", type="primary", key="login_submit"):
-            if input_user == username and input_pass == password:
-                st.session_state["authenticated"] = True
-                st.session_state["auth_user"] = input_user
-
-                if remember_me:
-                    COOKIE_MANAGER.set(
-                        cookie_name,
-                        expected_cookie_value,
-                        expires_at=datetime.now() + timedelta(days=cookie_expiry_days),
-                    )
-
-                st.rerun()
-            else:
-                st.error("Identifiants incorrects.")
-
-        st.stop()
-
-
-def render_logout():
-    cookie_name = st.secrets["auth_simple"]["cookie_name"]
-
-    with st.sidebar:
-        st.markdown("### Session")
-        st.write(f"Connecté : {st.session_state.get('auth_user', '-')}")
-        if st.button("Se déconnecter", use_container_width=True, key="logout_button"):
-            COOKIE_MANAGER.delete(cookie_name)
-            st.session_state["authenticated"] = False
-            st.session_state["auth_user"] = ""
-            st.rerun()
+APP_STATE_KEYS = (
+    "form_data",
+    "preview_data",
+    "preview_vals",
+    "existing_id",
+    "existing_data",
+    "seller_name",
+    "seller_user_id",
+)
 
 
 def add_audit_trail(vals, actor_user, seller_name, mode):
@@ -314,7 +260,7 @@ def update_lead(lead_id, vals):
 
 
 require_simple_auth()
-render_logout()
+render_logout(APP_STATE_KEYS)
 
 _init_state()
 st.title("Saisie prospection Odoo V2")
