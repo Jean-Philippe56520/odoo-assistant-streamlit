@@ -34,20 +34,6 @@ def comparable_phone(value):
     return re.sub(r"\D", "", normalize_text(value))
 
 
-def normalize_company(value):
-    raw = normalize_text(value).lower()
-    return re.sub(r"\s+", " ", raw)
-
-
-def normalize_city(value):
-    raw = normalize_text(value).lower()
-    return re.sub(r"\s+", " ", raw)
-
-
-def normalize_zip(value):
-    return re.sub(r"\D", "", normalize_text(value))
-
-
 def validate_email(value):
     email = normalize_email(value)
     if not email:
@@ -220,49 +206,53 @@ def build_vals_from_answers(answers, team_id, seller_user_id, replace_tags=True,
         vals["description"] = description
 
     tag_id = find_or_create_tag(answers["_models"], answers["_uid"], PROSPECTION_TAG)
-    vals["tag_ids"] = [(6, 0, [tag_id])]
+    vals["tag_ids"] = [(6, 0, [tag_id])] if replace_tags else [(4, tag_id)]
 
     return vals
 
 
 def preview_answers(vals, seller_name):
-    print(H("\n📝 Prévisualisation avant envoi"))
-    print(f"Commercial : {seller_name}")
-    print(f"Titre      : {vals.get('name', '')}")
-    print(f"Entreprise : {vals.get('partner_name', '-')}")
-    print(f"Contact    : {vals.get('contact_name', '-')}")
-    print(f"Téléphone  : {vals.get('phone', '-')}")
-    print(f"Mobile     : {vals.get('mobile', '-')}")
-    print(f"Email      : {vals.get('email_from', '-')}")
-    print(f"Adresse    : {vals.get('street', '-')}")
-    print(f"Complément : {vals.get('street2', '-')}")
-    print(f"CP/Ville   : {vals.get('zip', '-')} {vals.get('city', '-')}")
-    print(f"Étiquette  : {PROSPECTION_TAG}")
-    description = vals.get("description", "")
-    if description:
-        print(H("\n🗒️ Notes envoyées dans Odoo"))
-        print(description)
+    print(H("\n🧾 Prévisualisation de la piste"))
+    print(f"  • Vendeur confirmé: {seller_name}")
+
+    labels = {
+        "name": "Titre",
+        "partner_name": "Société",
+        "contact_name": "Contact",
+        "email_from": "Email",
+        "phone": "Téléphone",
+        "mobile": "Mobile",
+        "street": "Adresse 1",
+        "street2": "Adresse 2",
+        "zip": "Code postal",
+        "city": "Ville",
+        "description": "Notes",
+    }
+    for key, label in labels.items():
+        value = vals.get(key)
+        if value:
+            if key == "description":
+                print(f"  • {label}:\n{value}")
+            else:
+                print(f"  • {label}: {value}")
+
+    print(f"  • Étiquette: {PROSPECTION_TAG}")
 
 
-def choose_sales_user(models, uid):
+def choose_confirmed_seller(uid, models):
     sales_users = get_active_sales_users(models, uid)
     if not sales_users:
-        print(ERR("❌ Aucun utilisateur actif trouvé dans Odoo."))
-        sys.exit(1)
-
-    print(H("\n👤 Sélection du vendeur"))
-    for idx, user in enumerate(sales_users, 1):
-        login = f" ({user['login']})" if user.get("login") else ""
-        print(f"  {idx}. {user['name']}{login}")
+        print(WARN("Aucun vendeur actif trouvé. L'utilisateur connecté sera utilisé."))
+        return uid, "Utilisateur connecté"
 
     while True:
-        raw = input("Numéro du vendeur > ").strip()
-        if raw.lower() in ("stop", "quitter"):
-            print(WARN("Saisie interrompue."))
-            sys.exit(0)
+        print(H("\n🧑‍💼 Identification du commercial"))
+        for i, user in enumerate(sales_users, 1):
+            print(f"  {i}. {user['name']}")
 
+        raw = ask_text("Choisis ton numéro vendeur", required=True)
         if not raw.isdigit():
-            print(WARN("Merci de saisir un numéro."))
+            print(WARN("Merci de saisir un numéro de la liste."))
             continue
 
         index = int(raw)
@@ -279,45 +269,11 @@ def choose_sales_user(models, uid):
             sys.exit(0)
 
 
-def format_duplicate_reasons(reasons):
-    messages = []
-    seen = set()
-
-    mapping = {
-        "email_exact": "Email identique",
-        "phone_exact": "Téléphone identique",
-        "mobile_exact": "Mobile identique",
-        "company_city": "Société identique + ville identique",
-        "company_zip": "Société identique + code postal identique",
-    }
-
-    for reason in reasons or []:
-        reason_type = reason.get("type")
-        if reason_type in mapping and reason_type not in seen:
-            messages.append(mapping[reason_type])
-            seen.add(reason_type)
-
-    return messages
-
-
 def detect_existing_lead(models, uid, answers):
     email = normalize_email(answers.get("email_from"))
-    phone = comparable_phone(answers.get("phone"))
-    mobile = comparable_phone(answers.get("mobile"))
-    company = normalize_company(answers.get("partner_name"))
-    city = normalize_city(answers.get("city"))
-    zip_code = normalize_zip(answers.get("zip"))
-
-    return lead_exists(
-        models,
-        uid,
-        email=email,
-        phone=phone,
-        mobile=mobile,
-        company=company,
-        city=city,
-        zip_code=zip_code,
-    )
+    phone = normalize_phone(answers.get("phone"))
+    mobile = normalize_phone(answers.get("mobile"))
+    return lead_exists(models, uid, email, phone, mobile)
 
 
 def read_lead_summary(models, uid, lead_id):
@@ -337,8 +293,6 @@ def read_lead_summary(models, uid, lead_id):
                     "email_from",
                     "phone",
                     "mobile",
-                    "zip",
-                    "city",
                     "user_id",
                     "description",
                 ]
@@ -349,15 +303,12 @@ def read_lead_summary(models, uid, lead_id):
         return None
 
 
-def show_existing_lead_summary(existing_data, duplicate_info=None):
+def show_existing_lead_summary(existing_data):
     if not existing_data:
         print(WARN("Impossible de lire le détail du lead existant."))
         return
 
     print(H("\n🔎 Lead déjà détecté"))
-
-    matched_fields = {reason.get("field") for reason in (duplicate_info or {}).get("reasons", [])}
-
     seller = ""
     user_id = existing_data.get("user_id")
     if isinstance(user_id, list) and len(user_id) >= 2:
@@ -370,14 +321,11 @@ def show_existing_lead_summary(existing_data, duplicate_info=None):
         "email_from": "Email",
         "phone": "Téléphone",
         "mobile": "Mobile",
-        "zip": "Code postal",
-        "city": "Ville",
     }
     for key, label in mapping.items():
         value = normalize_text(existing_data.get(key))
         if value:
-            suffix = " ✅ correspondance" if key in matched_fields else ""
-            print(f"  • {label}: {value}{suffix}")
+            print(f"  • {label}: {value}")
     if seller:
         print(f"  • Vendeur actuel: {seller}")
 
@@ -480,8 +428,7 @@ def run_single_capture(uid, models, team_id, seller_user_id, seller_name):
         answers["_uid"] = uid
         answers["_models"] = models
 
-        duplicate_info = detect_existing_lead(models, uid, answers)
-        existing = duplicate_info["lead_id"] if duplicate_info else None
+        existing = detect_existing_lead(models, uid, answers)
         existing_data = read_lead_summary(models, uid, existing) if existing else None
 
         replace_tags = existing is None
@@ -509,14 +456,7 @@ def run_single_capture(uid, models, team_id, seller_user_id, seller_name):
 
         print(WARN(f"\n⚠️ Un lead similaire existe déjà (ID {existing})."))
         print(DIM("Vous pouvez le mettre à jour, créer une nouvelle piste, revenir à la correction ou annuler."))
-
-        reason_messages = format_duplicate_reasons((duplicate_info or {}).get("reasons"))
-        if reason_messages:
-            print(H("\n🧠 Motifs détectés"))
-            for message in reason_messages:
-                print(f"  • {message}")
-
-        show_existing_lead_summary(existing_data, duplicate_info)
+        show_existing_lead_summary(existing_data)
 
         while True:
             action = ask_duplicate_action()
@@ -578,7 +518,12 @@ def run_commercial_capture():
     uid, models = odoo_connect()
     team_id = find_team_ventes(models, uid)
     if not team_id:
-        print(WARN("ℹ️ Équipe 'Ventes' non trouvée : la piste sera créée sans équipe."))
+        print(WARN("⚠️ Équipe 'Ventes' introuvable. team_id ignoré."))
 
-    seller_user_id, seller_name = choose_sales_user(models, uid)
-    run_single_capture(uid, models, team_id, seller_user_id, seller_name)
+    seller_user_id, seller_name = choose_confirmed_seller(uid, models)
+
+    while True:
+        run_single_capture(uid, models, team_id, seller_user_id, seller_name)
+        print(H("\n🎉 Fin de la saisie guidée."))
+        if not ask_yes_no("Créer une autre piste ?", default_yes=False):
+            break
