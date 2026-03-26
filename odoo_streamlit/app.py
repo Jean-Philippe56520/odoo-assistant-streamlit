@@ -408,31 +408,28 @@ if preview_data and preview_vals:
                 reset_preview_only()
                 st.rerun()
     else:
-        confirm = st.checkbox("Je confirme la création de cette piste", key="confirm_create")
-
         col1, col2 = st.columns(2)
+
         with col1:
             if st.button("Créer la piste", type="primary", key="create_new_lead"):
-                if not confirm:
-                    st.error("Merci de confirmer la création.")
-                else:
-                    vals = build_vals_from_answers(
-                        preview_data,
-                        team_id,
-                        st.session_state["seller_user_id"],
-                        replace_tags=True,
-                        existing_description=None,
-                    )
-                    vals = add_audit_trail(
-                        vals,
-                        actor_user=st.session_state.get("auth_user", ""),
-                        seller_name=st.session_state.get("seller_name", ""),
-                        mode="création lead",
-                    )
-                    lead_id = create_lead(vals)
-                    st.success(f"Piste créée dans Odoo (ID {lead_id}).")
-                    reset_all()
-                    st.rerun()
+                vals = build_vals_from_answers(
+                    preview_data,
+                    team_id,
+                    st.session_state["seller_user_id"],
+                    replace_tags=True,
+                    existing_description=None,
+                )
+                vals = add_audit_trail(
+                    vals,
+                    actor_user=st.session_state.get("auth_user", ""),
+                    seller_name=st.session_state.get("seller_name", ""),
+                    mode="création lead",
+                )
+                lead_id = create_lead(vals)
+                st.success(f"Piste créée dans Odoo (ID {lead_id}).")
+                reset_all()
+                st.rerun()
+
         with col2:
             if st.button("Modifier la saisie", key="back_to_form_create"):
                 reset_preview_only()
