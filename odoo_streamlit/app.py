@@ -37,22 +37,22 @@ APP_STATE_KEYS = (
 )
 
 
-@st.cache_resource
-def get_odoo():
-    uid, models = odoo_connect()
-    return uid, models
+@st.cache_data(ttl=300)
+def get_odoo_uid():
+    uid, _ = odoo_connect()
+    return uid
 
 
 @st.cache_data(ttl=300)
 def get_sales_users():
-    uid, models = get_odoo()
-    return get_active_sales_users(models, uid)
+    uid = get_odoo_uid()
+    return get_active_sales_users(None, uid)
 
 
 @st.cache_data(ttl=300)
 def get_team_id():
-    uid, models = get_odoo()
-    return find_team_ventes(models, uid)
+    uid = get_odoo_uid()
+    return find_team_ventes(None, uid)
 
 
 def _init_state():
@@ -111,11 +111,11 @@ def validate_form(raw_data):
 
 
 def compute_preview(data, seller_name, seller_user_id):
-    uid, models = get_odoo()
+    uid = get_odoo_uid()
 
     preview = prepare_lead_preview(
         uid=uid,
-        models=models,
+        models=None,
         raw_data=data,
         team_id=get_team_id(),
         seller_user_id=seller_user_id,
@@ -175,14 +175,14 @@ def show_preview(preview_vals, raw_data, seller_name):
 
 
 def create_lead(vals):
-    uid, models = get_odoo()
-    result = create_new_lead(models, uid, vals)
+    uid = get_odoo_uid()
+    result = create_new_lead(None, uid, vals)
     return result.lead_id
 
 
 def update_lead(lead_id, vals):
-    uid, models = get_odoo()
-    result = update_existing_lead(models, uid, lead_id, vals)
+    uid = get_odoo_uid()
+    result = update_existing_lead(None, uid, lead_id, vals)
     return result.lead_id
 
 
@@ -194,7 +194,7 @@ st.title("Saisie prospection Odoo V2")
 st.caption("Version web sécurisée par identifiant partagé, avec contrôle des leads similaires et confirmation finale.")
 
 try:
-    uid, models = get_odoo()
+    uid = get_odoo_uid()
     sales_users = get_sales_users()
     team_id = get_team_id()
 except Exception as e:
