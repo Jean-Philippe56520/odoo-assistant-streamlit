@@ -35,6 +35,8 @@ APP_STATE_KEYS = (
     "seller_name",
     "seller_user_id",
     "result_banner",
+    "pending_form_reset",
+    "pending_preview_reset",
 )
 
 
@@ -72,30 +74,6 @@ def _empty_form_data():
     }
 
 
-def _clear_widget_state():
-    widget_defaults = {
-        "partner_name": "",
-        "contact_name": "",
-        "phone": "",
-        "mobile": "",
-        "email_from": "",
-        "street": "",
-        "street2": "",
-        "zip": "",
-        "city": "",
-        "current_equipment": "",
-        "free_comment": "",
-        "confirm_existing": False,
-        "duplicate_action_radio": "Mettre à jour le lead existant",
-    }
-
-    for key, value in widget_defaults.items():
-        st.session_state[key] = value
-
-    if "seller_selectbox" in st.session_state:
-        del st.session_state["seller_selectbox"]
-
-
 def _init_state():
     defaults = {
         "form_data": _empty_form_data(),
@@ -106,29 +84,64 @@ def _init_state():
         "seller_name": None,
         "seller_user_id": None,
         "result_banner": None,
+        "pending_form_reset": False,
+        "pending_preview_reset": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
 
-def reset_preview_only():
-    for key in ("preview_data", "preview_vals", "existing_id", "existing_data", "seller_name", "seller_user_id"):
-        st.session_state[key] = None
+def _apply_pending_resets():
+    if st.session_state.get("pending_form_reset"):
+        st.session_state["form_data"] = _empty_form_data()
+        st.session_state["preview_data"] = None
+        st.session_state["preview_vals"] = None
+        st.session_state["existing_id"] = None
+        st.session_state["existing_data"] = None
+        st.session_state["seller_name"] = None
+        st.session_state["seller_user_id"] = None
 
-    if "confirm_existing" in st.session_state:
+        st.session_state["partner_name"] = ""
+        st.session_state["contact_name"] = ""
+        st.session_state["phone"] = ""
+        st.session_state["mobile"] = ""
+        st.session_state["email_from"] = ""
+        st.session_state["street"] = ""
+        st.session_state["street2"] = ""
+        st.session_state["zip"] = ""
+        st.session_state["city"] = ""
+        st.session_state["current_equipment"] = ""
+        st.session_state["free_comment"] = ""
         st.session_state["confirm_existing"] = False
-    if "duplicate_action_radio" in st.session_state:
         st.session_state["duplicate_action_radio"] = "Mettre à jour le lead existant"
 
+        if "seller_selectbox" in st.session_state:
+            del st.session_state["seller_selectbox"]
 
-def reset_all(clear_banner=False):
-    _init_state()
-    st.session_state["form_data"] = _empty_form_data()
+        st.session_state["pending_form_reset"] = False
+        st.session_state["pending_preview_reset"] = False
+
+    elif st.session_state.get("pending_preview_reset"):
+        st.session_state["preview_data"] = None
+        st.session_state["preview_vals"] = None
+        st.session_state["existing_id"] = None
+        st.session_state["existing_data"] = None
+        st.session_state["seller_name"] = None
+        st.session_state["seller_user_id"] = None
+        st.session_state["confirm_existing"] = False
+        st.session_state["duplicate_action_radio"] = "Mettre à jour le lead existant"
+        st.session_state["pending_preview_reset"] = False
+
+
+def request_preview_reset():
+    st.session_state["pending_preview_reset"] = True
+
+
+def request_full_reset(clear_banner=False):
     if clear_banner:
         st.session_state["result_banner"] = None
-    reset_preview_only()
-    _clear_widget_state()
+    st.session_state["pending_form_reset"] = True
 
 
 def validate_form(raw_data):
@@ -214,6 +227,8 @@ require_simple_auth()
 render_logout(APP_STATE_KEYS)
 
 _init_state()
+_apply_pending_resets()
+
 st.title("Saisie prospection Odoo V2")
 st.caption("Version web sécurisée par identifiant partagé, avec contrôle des leads similaires et confirmation finale.")
 
@@ -289,9 +304,8 @@ if submitted:
 
     errors, clean_data = validate_form(raw_data)
     if errors:
-        reset_preview_only()
-        for error in errors:
-            st.error(error)
+        request_preview_reset()
+        st.rerun()
     else:
         compute_preview(clean_data, seller_name, seller_options[seller_name])
 
@@ -352,7 +366,7 @@ if preview_data and preview_vals:
                             "message": f"Mise à jour envoyée, mais confirmation Odoo incomplète. {result.message}",
                         }
 
-                    reset_all(clear_banner=False)
+                    request_full_reset(clear_banner=False)
                     st.rerun()
 
                 elif action == "Créer un nouveau lead quand même":
@@ -382,7 +396,7 @@ if preview_data and preview_vals:
                             "message": f"Création envoyée, mais confirmation Odoo incomplète. {result.message}",
                         }
 
-                    reset_all(clear_banner=False)
+                    request_full_reset(clear_banner=False)
                     st.rerun()
 
                 else:
@@ -390,12 +404,12 @@ if preview_data and preview_vals:
                         "status": "warning",
                         "message": "Opération annulée. Aucune piste n'a été créée ni modifiée.",
                     }
-                    reset_all(clear_banner=False)
+                    request_full_reset(clear_banner=False)
                     st.rerun()
 
         with col2:
             if st.button("Revenir à la saisie", key="back_to_form_existing"):
-                reset_preview_only()
+                request_preview_reset()
                 st.rerun()
 
     else:
@@ -429,10 +443,10 @@ if preview_data and preview_vals:
                         "message": f"La création a été lancée, mais la confirmation Odoo n'a pas pu être relue. {result.message}",
                     }
 
-                reset_all(clear_banner=False)
+                request_full_reset(clear_banner=False)
                 st.rerun()
 
         with col2:
             if st.button("Modifier la saisie", key="back_to_form_create"):
-                reset_preview_only()
+                request_preview_reset()
                 st.rerun()
