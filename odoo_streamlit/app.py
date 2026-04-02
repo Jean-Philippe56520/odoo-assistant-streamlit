@@ -9,18 +9,18 @@ if str(PROJECT_DIR) not in sys.path:
 
 from odoo_import.lead_service import (
     PROSPECTION_TAG,
+    add_audit_trail,
     build_title,
     build_vals_from_answers,
-    prepare_lead_preview,
-    validate_lead_data,
-    add_audit_trail,
     create_new_lead,
+    prepare_lead_preview,
     update_existing_lead,
+    validate_lead_data,
 )
 from odoo_import.odoo_client import (
-    odoo_connect,
     find_team_ventes,
     get_active_sales_users,
+    odoo_connect,
 )
 from odoo_streamlit.auth import require_simple_auth, render_logout
 
@@ -34,62 +34,30 @@ APP_STATE_KEYS = (
     "existing_data",
     "seller_name",
     "seller_user_id",
+    "result_banner",
 )
 
 
-@st.cache_data(ttl=300)
-def get_odoo_uid():
-    uid, _ = odoo_connect()
-    return uid
+@st.cache_resource
+def get_odoo():
+    uid, models = odoo_connect()
+    return uid, models
 
 
 @st.cache_data(ttl=300)
 def get_sales_users():
-    uid = get_odoo_uid()
-    return get_active_sales_users(None, uid)
+    uid, models = get_odoo()
+    return get_active_sales_users(models, uid)
 
 
 @st.cache_data(ttl=300)
 def get_team_id():
-    uid = get_odoo_uid()
-    return find_team_ventes(None, uid)
+    uid, models = get_odoo()
+    return find_team_ventes(models, uid)
 
 
-def _init_state():
-    defaults = {
-        "form_data": {
-            "partner_name": "",
-            "contact_name": "",
-            "phone": "",
-            "mobile": "",
-            "email_from": "",
-            "street": "",
-            "street2": "",
-            "zip": "",
-            "city": "",
-            "current_equipment": "",
-            "free_comment": "",
-        },
-        "preview_data": None,
-        "preview_vals": None,
-        "existing_id": None,
-        "existing_data": None,
-        "seller_name": None,
-        "seller_user_id": None,
-    }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-
-
-def reset_preview_only():
-    for key in ("preview_data", "preview_vals", "existing_id", "existing_data", "seller_name", "seller_user_id"):
-        st.session_state[key] = None
-
-
-def reset_all():
-    _init_state()
-    st.session_state["form_data"] = {
+def _empty_form_data():
+    return {
         "partner_name": "",
         "contact_name": "",
         "phone": "",
@@ -102,7 +70,65 @@ def reset_all():
         "current_equipment": "",
         "free_comment": "",
     }
+
+
+def _clear_widget_state():
+    widget_defaults = {
+        "partner_name": "",
+        "contact_name": "",
+        "phone": "",
+        "mobile": "",
+        "email_from": "",
+        "street": "",
+        "street2": "",
+        "zip": "",
+        "city": "",
+        "current_equipment": "",
+        "free_comment": "",
+        "confirm_existing": False,
+        "duplicate_action_radio": "Mettre à jour le lead existant",
+    }
+
+    for key, value in widget_defaults.items():
+        st.session_state[key] = value
+
+    if "seller_selectbox" in st.session_state:
+        del st.session_state["seller_selectbox"]
+
+
+def _init_state():
+    defaults = {
+        "form_data": _empty_form_data(),
+        "preview_data": None,
+        "preview_vals": None,
+        "existing_id": None,
+        "existing_data": None,
+        "seller_name": None,
+        "seller_user_id": None,
+        "result_banner": None,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def reset_preview_only():
+    for key in ("preview_data", "preview_vals", "existing_id", "existing_data", "seller_name", "seller_user_id"):
+        st.session_state[key] = None
+
+    if "confirm_existing" in st.session_state:
+        st.session_state["confirm_existing"] = False
+    if "duplicate_action_radio" in st.session_state:
+        st.session_state["duplicate_action_radio"] = "Mettre à jour le lead existant"
+
+
+def reset_all(clear_banner=False):
+    _init_state()
+    st.session_state["form_data"] = _empty_form_data()
+    if clear_banner:
+        st.session_state["result_banner"] = None
     reset_preview_only()
+    _clear_widget_state()
 
 
 def validate_form(raw_data):
@@ -111,11 +137,11 @@ def validate_form(raw_data):
 
 
 def compute_preview(data, seller_name, seller_user_id):
-    uid = get_odoo_uid()
+    uid, models = get_odoo()
 
     preview = prepare_lead_preview(
         uid=uid,
-        models=None,
+        models=models,
         raw_data=data,
         team_id=get_team_id(),
         seller_user_id=seller_user_id,
@@ -175,15 +201,13 @@ def show_preview(preview_vals, raw_data, seller_name):
 
 
 def create_lead(vals):
-    uid = get_odoo_uid()
-    result = create_new_lead(None, uid, vals)
-    return result.lead_id
+    uid, models = get_odoo()
+    return create_new_lead(models, uid, vals)
 
 
 def update_lead(lead_id, vals):
-    uid = get_odoo_uid()
-    result = update_existing_lead(None, uid, lead_id, vals)
-    return result.lead_id
+    uid, models = get_odoo()
+    return update_existing_lead(models, uid, lead_id, vals)
 
 
 require_simple_auth()
@@ -193,8 +217,17 @@ _init_state()
 st.title("Saisie prospection Odoo V2")
 st.caption("Version web sécurisée par identifiant partagé, avec contrôle des leads similaires et confirmation finale.")
 
+banner = st.session_state.get("result_banner")
+if banner:
+    if banner["status"] == "success":
+        st.success(banner["message"], icon="✅")
+    elif banner["status"] == "warning":
+        st.warning(banner["message"], icon="⚠️")
+    else:
+        st.error(banner["message"], icon="❌")
+
 try:
-    uid = get_odoo_uid()
+    uid, models = get_odoo()
     sales_users = get_sales_users()
     team_id = get_team_id()
 except Exception as e:
@@ -236,6 +269,8 @@ with st.form("lead_form"):
     submitted = st.form_submit_button("Prévisualiser")
 
 if submitted:
+    st.session_state["result_banner"] = None
+
     raw_data = {
         "partner_name": partner_name,
         "contact_name": contact_name,
@@ -304,10 +339,22 @@ if preview_data and preview_vals:
                         seller_name=st.session_state.get("seller_name", ""),
                         mode="mise à jour lead existant",
                     )
-                    update_lead(existing_id, vals)
-                    st.success(f"Lead mis à jour (ID {existing_id}).")
-                    reset_all()
+                    result = update_lead(existing_id, vals)
+
+                    if result.success:
+                        st.session_state["result_banner"] = {
+                            "status": "success",
+                            "message": f"Piste bien prise en compte par Odoo. Mise à jour confirmée (ID {result.lead_id}).",
+                        }
+                    else:
+                        st.session_state["result_banner"] = {
+                            "status": "warning",
+                            "message": f"Mise à jour envoyée, mais confirmation Odoo incomplète. {result.message}",
+                        }
+
+                    reset_all(clear_banner=False)
                     st.rerun()
+
                 elif action == "Créer un nouveau lead quand même":
                     vals = build_vals_from_answers(
                         preview_data,
@@ -322,18 +369,35 @@ if preview_data and preview_vals:
                         seller_name=st.session_state.get("seller_name", ""),
                         mode="création nouveau lead malgré doublon",
                     )
-                    lead_id = create_lead(vals)
-                    st.success(f"Nouveau lead créé (ID {lead_id}).")
-                    reset_all()
+                    result = create_lead(vals)
+
+                    if result.success:
+                        st.session_state["result_banner"] = {
+                            "status": "success",
+                            "message": f"Piste bien prise en compte par Odoo. Nouveau lead créé et confirmé (ID {result.lead_id}).",
+                        }
+                    else:
+                        st.session_state["result_banner"] = {
+                            "status": "warning",
+                            "message": f"Création envoyée, mais confirmation Odoo incomplète. {result.message}",
+                        }
+
+                    reset_all(clear_banner=False)
                     st.rerun()
+
                 else:
-                    st.info("Opération annulée.")
-                    reset_all()
+                    st.session_state["result_banner"] = {
+                        "status": "warning",
+                        "message": "Opération annulée. Aucune piste n'a été créée ni modifiée.",
+                    }
+                    reset_all(clear_banner=False)
                     st.rerun()
+
         with col2:
             if st.button("Revenir à la saisie", key="back_to_form_existing"):
                 reset_preview_only()
                 st.rerun()
+
     else:
         col1, col2 = st.columns(2)
 
@@ -352,9 +416,20 @@ if preview_data and preview_vals:
                     seller_name=st.session_state.get("seller_name", ""),
                     mode="création lead",
                 )
-                lead_id = create_lead(vals)
-                st.success(f"Piste créée dans Odoo (ID {lead_id}).")
-                reset_all()
+                result = create_lead(vals)
+
+                if result.success:
+                    st.session_state["result_banner"] = {
+                        "status": "success",
+                        "message": f"Piste bien prise en compte par Odoo. Création confirmée (ID {result.lead_id}).",
+                    }
+                else:
+                    st.session_state["result_banner"] = {
+                        "status": "warning",
+                        "message": f"La création a été lancée, mais la confirmation Odoo n'a pas pu être relue. {result.message}",
+                    }
+
+                reset_all(clear_banner=False)
                 st.rerun()
 
         with col2:
