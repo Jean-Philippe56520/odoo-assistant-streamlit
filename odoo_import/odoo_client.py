@@ -2,7 +2,7 @@ import http.client
 import socket
 import time
 import xmlrpc.client
-from typing import Any, Optional
+from typing import Optional
 from urllib.parse import urlparse
 
 from .config import (
@@ -16,6 +16,7 @@ from .config import (
     USER_MODEL,
 )
 from .console_utils import ERR, DIM
+
 
 XMLRPC_RETRY_ATTEMPTS = 3
 XMLRPC_RETRY_DELAY_SECONDS = 0.4
@@ -95,6 +96,13 @@ def _build_object_proxy():
 
 
 def odoo_connect():
+    """
+    Authentifie l'utilisateur Odoo.
+
+    Retourne :
+    - uid
+    - models : proxy XML-RPC objet, conservé pour compatibilité
+    """
     common = _build_common_proxy()
     try:
         uid = common.authenticate(ODOO_DB, ODOO_USER, ODOO_API_KEY, {})
@@ -111,10 +119,21 @@ def odoo_connect():
     if not uid:
         raise RuntimeError("Authentification Odoo échouée.")
 
-    return uid, None
+    # Compatibilité avec le reste du code existant
+    return uid, _build_object_proxy()
 
 
-def execute_kw(uid: int, model: str, method: str, args: Optional[list] = None, kwargs: Optional[dict] = None):
+def execute_kw(
+    uid: int,
+    model: str,
+    method: str,
+    args: Optional[list] = None,
+    kwargs: Optional[dict] = None,
+):
+    """
+    Exécute un appel Odoo avec une nouvelle connexion XML-RPC à chaque appel.
+    C'est le point clé pour éviter les CannotSendRequest sous Streamlit.
+    """
     args = args or []
     kwargs = kwargs or {}
     last_error: Optional[Exception] = None
@@ -122,7 +141,15 @@ def execute_kw(uid: int, model: str, method: str, args: Optional[list] = None, k
     for attempt in range(1, XMLRPC_RETRY_ATTEMPTS + 1):
         try:
             models = _build_object_proxy()
-            return models.execute_kw(ODOO_DB, uid, ODOO_API_KEY, model, method, args, kwargs)
+            return models.execute_kw(
+                ODOO_DB,
+                uid,
+                ODOO_API_KEY,
+                model,
+                method,
+                args,
+                kwargs,
+            )
         except xmlrpc.client.Fault:
             raise
         except RETRYABLE_EXCEPTIONS as exc:
@@ -138,7 +165,11 @@ def execute_kw(uid: int, model: str, method: str, args: Optional[list] = None, k
     )
 
 
-def find_or_create_tag(models: Any, uid: int, tag_name: str) -> int:
+def find_or_create_tag(models, uid, tag_name: str) -> int:
+    """
+    Le paramètre 'models' est conservé pour compatibilité,
+    mais n'est plus utilisé.
+    """
     tag_name = str(tag_name or "").strip()
     if not tag_name:
         raise ValueError("Le nom du tag est vide.")
@@ -161,7 +192,11 @@ def find_or_create_tag(models: Any, uid: int, tag_name: str) -> int:
     )
 
 
-def find_team_ventes(models: Any, uid: int):
+def find_team_ventes(models, uid):
+    """
+    Le paramètre 'models' est conservé pour compatibilité,
+    mais n'est plus utilisé.
+    """
     ids = execute_kw(
         uid,
         TEAM_MODEL,
@@ -172,7 +207,11 @@ def find_team_ventes(models: Any, uid: int):
     return ids[0] if ids else None
 
 
-def get_active_sales_users(models: Any, uid: int):
+def get_active_sales_users(models, uid):
+    """
+    Le paramètre 'models' est conservé pour compatibilité,
+    mais n'est plus utilisé.
+    """
     return execute_kw(
         uid,
         USER_MODEL,
@@ -182,7 +221,11 @@ def get_active_sales_users(models: Any, uid: int):
     )
 
 
-def lead_exists(models: Any, uid: int, email, phone, mobile=None):
+def lead_exists(models, uid, email, phone, mobile=None):
+    """
+    Le paramètre 'models' est conservé pour compatibilité,
+    mais n'est plus utilisé.
+    """
     email = (email or "").strip()
     phone = (phone or "").strip()
     mobile = (mobile or "").strip()
