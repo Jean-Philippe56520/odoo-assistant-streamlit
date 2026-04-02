@@ -1,4 +1,9 @@
+import http.client
+import socket
+import time
 import xmlrpc.client
+from typing import Any, Optional
+from urllib.parse import urlparse
 
 from .config import (
     ODOO_URL,
@@ -12,9 +17,85 @@ from .config import (
 )
 from .console_utils import ERR, DIM
 
+XMLRPC_RETRY_ATTEMPTS = 3
+XMLRPC_RETRY_DELAY_SECONDS = 0.4
+XMLRPC_TIMEOUT_SECONDS = 30
+
+
+class TimeoutTransport(xmlrpc.client.Transport):
+    """Transport XML-RPC HTTP avec timeout."""
+
+    def __init__(self, timeout: int = XMLRPC_TIMEOUT_SECONDS, use_datetime: bool = False):
+        super().__init__(use_datetime=use_datetime)
+        self._timeout = timeout
+
+    def make_connection(self, host):
+        connection = super().make_connection(host)
+        try:
+            connection.timeout = self._timeout
+        except Exception:
+            pass
+        return connection
+
+
+class TimeoutSafeTransport(xmlrpc.client.SafeTransport):
+    """Transport XML-RPC HTTPS avec timeout."""
+
+    def __init__(self, timeout: int = XMLRPC_TIMEOUT_SECONDS, use_datetime: bool = False):
+        super().__init__(use_datetime=use_datetime)
+        self._timeout = timeout
+
+    def make_connection(self, host):
+        connection = super().make_connection(host)
+        try:
+            connection.timeout = self._timeout
+        except Exception:
+            pass
+        return connection
+
+
+COMMON_ENDPOINT = f"{ODOO_URL}/xmlrpc/2/common"
+OBJECT_ENDPOINT = f"{ODOO_URL}/xmlrpc/2/object"
+URL_SCHEME = urlparse(ODOO_URL).scheme.lower()
+
+
+RETRYABLE_EXCEPTIONS = (
+    http.client.CannotSendRequest,
+    http.client.ResponseNotReady,
+    ConnectionResetError,
+    BrokenPipeError,
+    TimeoutError,
+    socket.timeout,
+    xmlrpc.client.ProtocolError,
+)
+
+
+def _build_transport():
+    if URL_SCHEME == "https":
+        return TimeoutSafeTransport()
+    return TimeoutTransport()
+
+
+def _build_common_proxy():
+    return xmlrpc.client.ServerProxy(
+        COMMON_ENDPOINT,
+        allow_none=True,
+        use_datetime=True,
+        transport=_build_transport(),
+    )
+
+
+def _build_object_proxy():
+    return xmlrpc.client.ServerProxy(
+        OBJECT_ENDPOINT,
+        allow_none=True,
+        use_datetime=True,
+        transport=_build_transport(),
+    )
+
 
 def odoo_connect():
-    common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
+    common = _build_common_proxy()
     try:
         uid = common.authenticate(ODOO_DB, ODOO_USER, ODOO_API_KEY, {})
     except xmlrpc.client.Fault as fault:
@@ -30,59 +111,78 @@ def odoo_connect():
     if not uid:
         raise RuntimeError("Authentification Odoo échouée.")
 
-    models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
-    return uid, models
+    return uid, None
 
 
-def find_or_create_tag(models, uid, tag_name: str) -> int:
-    ids = models.execute_kw(
-        ODOO_DB,
+def execute_kw(uid: int, model: str, method: str, args: Optional[list] = None, kwargs: Optional[dict] = None):
+    args = args or []
+    kwargs = kwargs or {}
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, XMLRPC_RETRY_ATTEMPTS + 1):
+        try:
+            models = _build_object_proxy()
+            return models.execute_kw(ODOO_DB, uid, ODOO_API_KEY, model, method, args, kwargs)
+        except xmlrpc.client.Fault:
+            raise
+        except RETRYABLE_EXCEPTIONS as exc:
+            last_error = exc
+            if attempt >= XMLRPC_RETRY_ATTEMPTS:
+                break
+            time.sleep(XMLRPC_RETRY_DELAY_SECONDS * attempt)
+        except Exception as exc:
+            raise RuntimeError(f"Erreur Odoo sur {model}.{method} : {exc}") from exc
+
+    raise RuntimeError(
+        f"Erreur réseau XML-RPC sur {model}.{method} après {XMLRPC_RETRY_ATTEMPTS} tentatives : {last_error}"
+    )
+
+
+def find_or_create_tag(models: Any, uid: int, tag_name: str) -> int:
+    tag_name = str(tag_name or "").strip()
+    if not tag_name:
+        raise ValueError("Le nom du tag est vide.")
+
+    ids = execute_kw(
         uid,
-        ODOO_API_KEY,
         TAG_MODEL,
         "search",
-        [[("name", "=", tag_name)]],
-        {"limit": 1},
+        args=[[("name", "=", tag_name)]],
+        kwargs={"limit": 1},
     )
     if ids:
         return ids[0]
 
-    return models.execute_kw(
-        ODOO_DB,
+    return execute_kw(
         uid,
-        ODOO_API_KEY,
         TAG_MODEL,
         "create",
-        [{"name": tag_name}],
+        args=[[{"name": tag_name}]],
     )
 
 
-def find_team_ventes(models, uid):
-    ids = models.execute_kw(
-        ODOO_DB,
+def find_team_ventes(models: Any, uid: int):
+    ids = execute_kw(
         uid,
-        ODOO_API_KEY,
         TEAM_MODEL,
         "search",
-        [[("name", "ilike", "Ventes")]],
-        {"limit": 1},
+        args=[[("name", "ilike", "Ventes")]],
+        kwargs={"limit": 1},
     )
     return ids[0] if ids else None
 
 
-def get_active_sales_users(models, uid):
-    return models.execute_kw(
-        ODOO_DB,
+def get_active_sales_users(models: Any, uid: int):
+    return execute_kw(
         uid,
-        ODOO_API_KEY,
         USER_MODEL,
         "search_read",
-        [[("active", "=", True)]],
-        {"fields": ["id", "name", "login"], "order": "name asc"},
+        args=[[("active", "=", True)]],
+        kwargs={"fields": ["id", "name", "login"], "order": "name asc"},
     )
 
 
-def lead_exists(models, uid, email, phone, mobile=None):
+def lead_exists(models: Any, uid: int, email, phone, mobile=None):
     email = (email or "").strip()
     phone = (phone or "").strip()
     mobile = (mobile or "").strip()
@@ -103,13 +203,11 @@ def lead_exists(models, uid, email, phone, mobile=None):
     else:
         domain = ["|"] * (len(terms) - 1) + terms
 
-    ids = models.execute_kw(
-        ODOO_DB,
+    ids = execute_kw(
         uid,
-        ODOO_API_KEY,
         LEAD_MODEL,
         "search",
-        [domain],
-        {"limit": 1},
+        args=[domain],
+        kwargs={"limit": 1},
     )
     return ids[0] if ids else False

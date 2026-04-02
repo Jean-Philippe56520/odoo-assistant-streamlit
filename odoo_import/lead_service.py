@@ -3,8 +3,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from .config import ODOO_DB, ODOO_API_KEY, LEAD_MODEL
-from .odoo_client import find_or_create_tag, lead_exists
+from .config import LEAD_MODEL
+from .odoo_client import execute_kw, find_or_create_tag, lead_exists
 
 
 PROSPECTION_TAG = "Prospection"
@@ -203,7 +203,6 @@ def add_audit_trail(vals, actor_user=None, seller_name=None, mode=None):
 
 
 def build_vals_from_answers(data, team_id, seller_user_id, replace_tags=True, existing_description=None):
-    models = data.get("_models")
     uid = data.get("_uid")
 
     vals = {
@@ -237,8 +236,8 @@ def build_vals_from_answers(data, team_id, seller_user_id, replace_tags=True, ex
     if description:
         vals["description"] = description
 
-    if models is not None and uid is not None:
-        tag_id = find_or_create_tag(models, uid, PROSPECTION_TAG)
+    if uid is not None:
+        tag_id = find_or_create_tag(None, uid, PROSPECTION_TAG)
         vals["tag_ids"] = [(6, 0, [tag_id])] if replace_tags else [(4, tag_id)]
 
     return vals
@@ -248,7 +247,7 @@ def detect_existing_lead(models, uid, data):
     email = normalize_email(data.get("email_from"))
     phone = normalize_phone(data.get("phone"))
     mobile = normalize_phone(data.get("mobile"))
-    return lead_exists(models, uid, email, phone, mobile)
+    return lead_exists(None, uid, email, phone, mobile)
 
 
 def read_lead_summary(models, uid, lead_id):
@@ -256,14 +255,12 @@ def read_lead_summary(models, uid, lead_id):
         return None
 
     try:
-        rows = models.execute_kw(
-            ODOO_DB,
+        rows = execute_kw(
             uid,
-            ODOO_API_KEY,
             LEAD_MODEL,
             "read",
-            [[lead_id]],
-            {
+            args=[[lead_id]],
+            kwargs={
                 "fields": [
                     "name",
                     "partner_name",
@@ -303,7 +300,6 @@ def prepare_lead_preview(
 
     work_data = dict(validation.cleaned_data)
     work_data["_uid"] = uid
-    work_data["_models"] = models
     if actor_user is not None:
         work_data["_actor_user"] = actor_user
 
@@ -343,14 +339,7 @@ def prepare_lead_preview(
 
 
 def create_new_lead(models, uid, vals):
-    lead_id = models.execute_kw(
-        ODOO_DB,
-        uid,
-        ODOO_API_KEY,
-        LEAD_MODEL,
-        "create",
-        [vals],
-    )
+    lead_id = execute_kw(uid, LEAD_MODEL, "create", args=[[vals]])
     return LeadActionResult(
         success=True,
         action="create",
@@ -360,14 +349,7 @@ def create_new_lead(models, uid, vals):
 
 
 def update_existing_lead(models, uid, lead_id, vals):
-    models.execute_kw(
-        ODOO_DB,
-        uid,
-        ODOO_API_KEY,
-        LEAD_MODEL,
-        "write",
-        [[lead_id], vals],
-    )
+    execute_kw(uid, LEAD_MODEL, "write", args=[[lead_id], vals])
     return LeadActionResult(
         success=True,
         action="update",

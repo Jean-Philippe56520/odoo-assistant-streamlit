@@ -1,20 +1,31 @@
-import os, re, sys, unicodedata
+import os
+import re
+import sys
+
 import pandas as pd
 
 try:
-    from .config import FILES_DIR, ALLOWED_EXT, FORCE_CREATE, ODOO_DB, ODOO_API_KEY, LEAD_MODEL
+    from .config import FILES_DIR, ALLOWED_EXT, FORCE_CREATE, LEAD_MODEL, ODOO_API_KEY
     from .console_utils import H, OK, WARN, ERR, DIM
     from .odoo_client import (
-        odoo_connect, find_team_ventes, get_active_sales_users,
-        lead_exists, find_or_create_tag
+        execute_kw,
+        find_or_create_tag,
+        find_team_ventes,
+        get_active_sales_users,
+        lead_exists,
+        odoo_connect,
     )
     from .mapping_wizard import autosuggest_mapping, run_mapping_wizard, notes_wizard, print_preview_block
 except ImportError:
-    from config import FILES_DIR, ALLOWED_EXT, FORCE_CREATE, ODOO_DB, ODOO_API_KEY, LEAD_MODEL
+    from config import FILES_DIR, ALLOWED_EXT, FORCE_CREATE, LEAD_MODEL, ODOO_API_KEY
     from console_utils import H, OK, WARN, ERR, DIM
     from odoo_client import (
-        odoo_connect, find_team_ventes, get_active_sales_users,
-        lead_exists, find_or_create_tag
+        execute_kw,
+        find_or_create_tag,
+        find_team_ventes,
+        get_active_sales_users,
+        lead_exists,
+        odoo_connect,
     )
     from mapping_wizard import autosuggest_mapping, run_mapping_wizard, notes_wizard, print_preview_block
 
@@ -38,7 +49,7 @@ def pick_file():
     while True:
         raw = input("Choisis un numéro de fichier > ").strip()
         if raw.isdigit() and 1 <= int(raw) <= len(files):
-            return os.path.join(FILES_DIR, files[int(raw)-1])
+            return os.path.join(FILES_DIR, files[int(raw) - 1])
         print(WARN("Numéro invalide."))
 
 
@@ -51,12 +62,23 @@ def load_file(path):
     raise ValueError("Format non supporté. CSV ou XLSX.")
 
 
-def build_vals_from_row(row, mapping, notes_cfg, models, uid, team_id, default_seller_user_id):
+def build_vals_from_row(row, mapping, notes_cfg, uid, team_id, default_seller_user_id, tag_cache=None):
+    tag_cache = tag_cache if tag_cache is not None else {}
     vals = {}
     vals["name"] = str(row.get(mapping["name"], "")).strip() or "Piste sans nom"
 
-    for f in ("partner_name", "contact_name", "email_from", "phone", "mobile",
-              "street", "street2", "zip", "city", "country_id"):
+    for f in (
+        "partner_name",
+        "contact_name",
+        "email_from",
+        "phone",
+        "mobile",
+        "street",
+        "street2",
+        "zip",
+        "city",
+        "country_id",
+    ):
         col = mapping.get(f)
         if col:
             v = row.get(col)
@@ -67,8 +89,14 @@ def build_vals_from_row(row, mapping, notes_cfg, models, uid, team_id, default_s
         vals["team_id"] = team_id
 
     tags = []
+
+    def resolve_tag_id(tag_name):
+        if tag_name not in tag_cache:
+            tag_cache[tag_name] = find_or_create_tag(None, uid, tag_name)
+        return tag_cache[tag_name]
+
     if mapping.get("tag_fixed"):
-        tags.append(find_or_create_tag(models, uid, mapping["tag_fixed"]))
+        tags.append(resolve_tag_id(mapping["tag_fixed"]))
     else:
         tag_col = mapping.get("tag_ids")
         if tag_col:
@@ -77,9 +105,9 @@ def build_vals_from_row(row, mapping, notes_cfg, models, uid, team_id, default_s
                 for p in re.split(r"[;,/|]+", str(raw_tag)):
                     t = p.strip()
                     if t:
-                        tags.append(find_or_create_tag(models, uid, t))
+                        tags.append(resolve_tag_id(t))
     if tags:
-        vals["tag_ids"] = [(6, 0, tags)]
+        vals["tag_ids"] = [(6, 0, sorted(set(tags)))]
 
     notes_parts = []
     for col, label in notes_cfg:
@@ -115,22 +143,22 @@ def run_import():
     mapping, notes_cfg = run_mapping_wizard(columns)
     print_preview_block("🔍 PREVIEW 1 (champs mappés)", df, mapping, notes_cfg)
 
-    uid, models = odoo_connect()
-    team_id = find_team_ventes(models, uid)
+    uid, _ = odoo_connect()
+    team_id = find_team_ventes(None, uid)
     if not team_id:
         print(WARN("⚠️ Équipe 'Ventes' introuvable. team_id ignoré."))
 
     _, _, note_cols = autosuggest_mapping(columns)
     notes_cfg = notes_wizard(columns, note_cols)
 
-    sales_users = get_active_sales_users(models, uid)
+    sales_users = get_active_sales_users(None, uid)
     print(H("\n🧑‍💼 Vendeurs disponibles dans Odoo :"))
     for i, u in enumerate(sales_users, 1):
         print(f"  {i}. {u['name']}")
 
     raw = input("Choisis le vendeur par défaut (Entrée = toi) > ").strip()
     if raw.isdigit() and 1 <= int(raw) <= len(sales_users):
-        default_seller_user_id = sales_users[int(raw)-1]["id"]
+        default_seller_user_id = sales_users[int(raw) - 1]["id"]
     else:
         default_seller_user_id = uid
 
@@ -142,24 +170,26 @@ def run_import():
 
     created, updated = 0, 0
     total = len(df)
+    tag_cache = {}
+
     print(H(f"\n📦 Import en cours… {total} lignes à traiter"))
     if FORCE_CREATE:
         print(WARN("⚠️ MODE FORCE_CREATE actif : aucune mise à jour ne sera faite."))
 
     for idx, (_, r) in enumerate(df.iterrows(), 1):
         row = r.to_dict()
-        vals = build_vals_from_row(row, mapping, notes_cfg, models, uid, team_id, default_seller_user_id)
+        vals = build_vals_from_row(row, mapping, notes_cfg, uid, team_id, default_seller_user_id, tag_cache=tag_cache)
 
         if FORCE_CREATE:
             existing = False
         else:
-            existing = lead_exists(models, uid, vals.get("email_from"), vals.get("phone"), vals.get("mobile"))
+            existing = lead_exists(None, uid, vals.get("email_from"), vals.get("phone"), vals.get("mobile"))
 
         if existing:
-            models.execute_kw(ODOO_DB, uid, ODOO_API_KEY, LEAD_MODEL, "write", [[existing], vals])
+            execute_kw(uid, LEAD_MODEL, "write", args=[[existing], vals])
             updated += 1
         else:
-            models.execute_kw(ODOO_DB, uid, ODOO_API_KEY, LEAD_MODEL, "create", [vals])
+            execute_kw(uid, LEAD_MODEL, "create", args=[[vals]])
             created += 1
 
         if idx % 10 == 0 or idx == total:

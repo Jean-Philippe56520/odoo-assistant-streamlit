@@ -122,7 +122,7 @@ def preview_answers(vals, seller_name):
 
 
 def choose_confirmed_seller(uid, models):
-    sales_users = get_active_sales_users(models, uid)
+    sales_users = get_active_sales_users(None, uid)
     if not sales_users:
         print(WARN("Aucun vendeur actif trouvé. L'utilisateur connecté sera utilisé."))
         return uid, "Utilisateur connecté"
@@ -346,15 +346,15 @@ def run_commercial_capture():
         print(ERR("❌ ODOO_API_KEY manquante."))
         sys.exit(1)
 
-    uid, models = odoo_connect()
-    team_id = find_team_ventes(models, uid)
+    uid, _ = odoo_connect()
+    team_id = find_team_ventes(None, uid)
     if not team_id:
         print(WARN("⚠️ Équipe 'Ventes' introuvable. team_id ignoré."))
 
-    seller_user_id, seller_name = choose_confirmed_seller(uid, models)
+    seller_user_id, seller_name = choose_confirmed_seller(uid, None)
 
     while True:
-        run_single_capture(uid, models, team_id, seller_user_id, seller_name)
+        run_single_capture(uid, None, team_id, seller_user_id, seller_name)
         print(H("\n🎉 Fin de la saisie guidée."))
         if not ask_yes_no("Créer une autre piste ?", default_yes=False):
             break
