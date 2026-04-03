@@ -153,8 +153,6 @@ def build_title(data):
 
 def build_new_note_block(data):
     parts = []
-    stamp = datetime.now().strftime("%d/%m/%Y %H:%M")
-    parts.append(f"--- Saisie prospection du {stamp} ---")
 
     current_equipment = normalize_text(data.get("current_equipment"))
     if current_equipment:
@@ -186,10 +184,7 @@ def merge_descriptions(existing_description, data):
 def add_audit_trail(vals, actor_user=None, seller_name=None, mode=None):
     stamp = datetime.now().strftime("%d/%m/%Y %H:%M")
     audit_block = (
-        f"--- Trace application ---\n"
         f"Action : {mode or '-'}\n"
-        f"Compte connecté : {actor_user or '-'}\n"
-        f"Commercial sélectionné : {seller_name or '-'}\n"
         f"Date : {stamp}"
     )
 
