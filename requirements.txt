@@ -1,7 +1,7 @@
-streamlit
-python-dotenv
-colorama
-pandas
-openpyxl
-rapidfuzz
-extra-streamlit-components
+streamlit==1.56.0
+python-dotenv==1.2.2
+colorama==0.4.6
+pandas==3.0.2
+openpyxl==3.1.5
+rapidfuzz==3.14.5
+extra-streamlit-components==0.1.81
