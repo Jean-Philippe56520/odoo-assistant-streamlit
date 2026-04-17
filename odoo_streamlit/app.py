@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -18,6 +20,16 @@ from odoo_streamlit.views import render_banner, render_page_header, show_existin
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
 
 
+def render_form_errors():
+    errors = st.session_state.get("form_errors") or []
+    if not errors:
+        return
+
+    st.error("Le formulaire contient des erreurs.")
+    for error in errors:
+        st.write(f"- {error}")
+
+
 require_simple_auth()
 render_logout(APP_STATE_KEYS)
 
@@ -26,6 +38,7 @@ apply_pending_resets()
 
 render_page_header()
 render_banner()
+render_form_errors()
 
 try:
     uid, models = get_odoo()
@@ -47,9 +60,12 @@ submitted, seller_name, raw_data = render_lead_form(seller_names)
 if submitted:
     st.session_state["result_banner"] = None
     st.session_state["form_data"] = raw_data
+    st.session_state["form_errors"] = []
 
     errors, clean_data = validate_form(raw_data)
+
     if errors:
+        st.session_state["form_errors"] = errors
         request_preview_reset()
         st.rerun()
 
@@ -59,21 +75,31 @@ if submitted:
         seller_options[seller_name],
         actor_user=st.session_state.get("auth_user", ""),
     )
+
+    if not preview.is_valid:
+        st.session_state["form_errors"] = preview.errors or ["La prévisualisation a échoué."]
+        request_preview_reset()
+        st.rerun()
+
     st.session_state["preview_data"] = preview.cleaned_data
     st.session_state["preview_vals"] = preview.vals
     st.session_state["existing_id"] = preview.existing_match.lead_id if preview.existing_match else None
     st.session_state["existing_data"] = preview.existing_match.summary if preview.existing_match else None
     st.session_state["seller_name"] = seller_name
     st.session_state["seller_user_id"] = seller_options[seller_name]
+    st.session_state["form_errors"] = []
 
-preview_data = st.session_state["preview_data"]
-preview_vals = st.session_state["preview_vals"]
-existing_id = st.session_state["existing_id"]
-existing_data = st.session_state["existing_data"]
+    st.rerun()
+
+preview_data = st.session_state.get("preview_data")
+preview_vals = st.session_state.get("preview_vals")
+existing_id = st.session_state.get("existing_id")
+existing_data = st.session_state.get("existing_data")
+seller_name = st.session_state.get("seller_name")
 
 if preview_data and preview_vals:
     st.divider()
-    show_preview(preview_vals, preview_data, st.session_state["seller_name"])
+    show_preview(preview_vals, preview_data, seller_name)
 
     if existing_id:
         st.warning(f"Un lead similaire existe déjà (ID {existing_id}).")
@@ -81,6 +107,7 @@ if preview_data and preview_vals:
             "Le système signale une similarité. Vous décidez ensuite de mettre à jour, "
             "créer quand même, ou annuler."
         )
+
         show_existing(existing_data)
 
         action = st.radio(
@@ -92,15 +119,23 @@ if preview_data and preview_vals:
             ),
             key="duplicate_action_radio",
         )
+
         confirm = st.checkbox("Je confirme cette action", key="confirm_existing")
 
         col1, col2 = st.columns(2)
+
         with col1:
             if st.button("Valider l'action", type="primary", key="validate_existing_action"):
                 if not confirm:
                     st.error("Merci de confirmer l'action.")
                 else:
-                    process_duplicate_action(action, preview_data, existing_data, existing_id, team_id)
+                    process_duplicate_action(
+                        action=action,
+                        preview_data=preview_data,
+                        existing_data=existing_data,
+                        existing_id=existing_id,
+                        team_id=team_id,
+                    )
 
         with col2:
             if st.button("Revenir à la saisie", key="back_to_form_existing"):
@@ -109,6 +144,7 @@ if preview_data and preview_vals:
 
     else:
         col1, col2 = st.columns(2)
+
         with col1:
             if st.button("Créer la piste", type="primary", key="create_new_lead"):
                 process_create_action(preview_data, team_id)
