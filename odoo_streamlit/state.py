@@ -57,6 +57,7 @@ def init_state():
         "pending_form_reset": False,
         "pending_preview_reset": False,
         "form_errors": [],
+        "form_warnings": [],
     }
 
     for key, value in defaults.items():
@@ -100,6 +101,7 @@ def request_full_reset(clear_banner: bool = False):
 def _reset_form_and_preview_state():
     st.session_state["form_data"] = empty_form_data()
     st.session_state["form_errors"] = []
+    st.session_state["form_warnings"] = []
     _reset_preview_state()
 
 
@@ -124,6 +126,7 @@ def _reset_form_widgets():
         st.session_state[key] = defaults[key]
 
     st.session_state["form_errors"] = []
+    st.session_state["form_warnings"] = []
     st.session_state["confirm_existing"] = False
     st.session_state["duplicate_action_radio"] = DEFAULT_DUPLICATE_ACTION
 
