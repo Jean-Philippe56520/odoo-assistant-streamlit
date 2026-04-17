@@ -56,28 +56,27 @@ USER_MODEL = "res.users"
 FORCE_CREATE = os.getenv("FORCE_CREATE", "true").strip().lower() in ("1", "true", "yes", "y", "on")
 
 # ============================================================
-# VALIDATION
+# VALIDATION DIFFÉRÉE
 # ============================================================
 
-missing = []
+def get_missing_odoo_settings() -> list[str]:
+    """
+    Retourne la liste des paramètres Odoo manquants.
 
-if not ODOO_URL:
-    missing.append("ODOO_URL")
-if not ODOO_DB:
-    missing.append("ODOO_DB")
-if not ODOO_USER:
-    missing.append("ODOO_USER")
-if not ODOO_API_KEY:
-    missing.append("ODOO_API_KEY")
+    Important :
+    - ne lève pas d'exception à l'import du module
+    - permet à Streamlit de démarrer proprement
+    - la validation se fait ensuite au moment de la connexion réelle à Odoo
+    """
+    missing = []
 
-if missing:
-    if st is not None:
-        raise ValueError(
-            "Variables de configuration manquantes dans Streamlit Secrets : "
-            + ", ".join(missing)
-        )
-    else:
-        raise ValueError(
-            "Variables d'environnement manquantes (.env) : "
-            + ", ".join(missing)
-        )
+    if not ODOO_URL:
+        missing.append("ODOO_URL")
+    if not ODOO_DB:
+        missing.append("ODOO_DB")
+    if not ODOO_USER:
+        missing.append("ODOO_USER")
+    if not ODOO_API_KEY:
+        missing.append("ODOO_API_KEY")
+
+    return missing
