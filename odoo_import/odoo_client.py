@@ -22,6 +22,9 @@ XMLRPC_RETRY_ATTEMPTS = 3
 XMLRPC_RETRY_DELAY_SECONDS = 0.4
 XMLRPC_TIMEOUT_SECONDS = 30
 
+ACTIVITY_MODEL = "mail.activity"
+ACTIVITY_TYPE_MODEL = "mail.activity.type"
+
 
 class TimeoutTransport(xmlrpc.client.Transport):
     """Transport XML-RPC HTTP avec timeout."""
@@ -119,7 +122,6 @@ def odoo_connect():
     if not uid:
         raise RuntimeError("Authentification Odoo échouée.")
 
-    # Compatibilité avec le reste du code existant
     return uid, _build_object_proxy()
 
 
@@ -254,3 +256,126 @@ def lead_exists(models, uid, email, phone, mobile=None):
         kwargs={"limit": 1},
     )
     return ids[0] if ids else False
+
+
+def get_model_id_by_name(uid: int, model_name: str) -> int:
+    """
+    Retourne l'ID de ir.model pour un modèle technique donné.
+    Exemple : crm.lead
+    """
+    ids = execute_kw(
+        uid,
+        "ir.model",
+        "search",
+        args=[[("model", "=", model_name)]],
+        kwargs={"limit": 1},
+    )
+    if not ids:
+        raise RuntimeError(f"Modèle Odoo introuvable dans ir.model : {model_name}")
+    return ids[0]
+
+
+def resolve_activity_type_by_name(uid: int, activity_type_name: str) -> int | None:
+    """
+    Recherche souple d'un type d'activité Odoo par nom.
+    """
+    activity_type_name = str(activity_type_name or "").strip()
+    if not activity_type_name:
+        return None
+
+    ids = execute_kw(
+        uid,
+        ACTIVITY_TYPE_MODEL,
+        "search",
+        args=[[("name", "=", activity_type_name)]],
+        kwargs={"limit": 1},
+    )
+    if ids:
+        return ids[0]
+
+    ids = execute_kw(
+        uid,
+        ACTIVITY_TYPE_MODEL,
+        "search",
+        args=[[("name", "ilike", activity_type_name)]],
+        kwargs={"limit": 1},
+    )
+    if ids:
+        return ids[0]
+
+    return None
+
+
+def get_default_todo_activity_type_id(uid: int) -> int | None:
+    """
+    Fallback pour récupérer un type d'activité To-Do / Tâche si non résolu plus tôt.
+    """
+    for candidate in ("To-Do", "Tâche", "Todo"):
+        activity_type_id = resolve_activity_type_by_name(uid, candidate)
+        if activity_type_id:
+            return activity_type_id
+    return None
+
+
+def create_activity_for_lead(uid: int, lead_id: int, activity_vals: dict) -> int:
+    """
+    Crée une activité Odoo liée à un crm.lead.
+
+    activity_vals attendu :
+    {
+        "summary": "...",
+        "date_deadline": "YYYY-MM-DD",
+        "user_id": 12,
+        "activity_type_id": 4,                 # optionnel mais recommandé
+        "_activity_type_label": "To-Do"       # optionnel, fallback de résolution
+    }
+    """
+    if not lead_id:
+        raise ValueError("lead_id manquant pour la création d'activité.")
+
+    if not activity_vals:
+        raise ValueError("activity_vals vide.")
+
+    summary = str(activity_vals.get("summary") or "").strip()
+    date_deadline = str(activity_vals.get("date_deadline") or "").strip()
+    user_id = activity_vals.get("user_id")
+    activity_type_id = activity_vals.get("activity_type_id")
+    activity_type_label = str(activity_vals.get("_activity_type_label") or "").strip()
+
+    if not summary:
+        raise ValueError("Le résumé de l'activité est obligatoire.")
+    if not date_deadline:
+        raise ValueError("La date d'échéance de l'activité est obligatoire.")
+    if not user_id:
+        raise ValueError("Le user_id de l'activité est obligatoire.")
+
+    if not activity_type_id:
+        if activity_type_label:
+            activity_type_id = resolve_activity_type_by_name(uid, activity_type_label)
+        if not activity_type_id:
+            activity_type_id = get_default_todo_activity_type_id(uid)
+
+    if not activity_type_id:
+        raise RuntimeError("Impossible de résoudre un type d'activité Odoo valide.")
+
+    res_model_id = get_model_id_by_name(uid, LEAD_MODEL)
+
+    create_vals = {
+        "res_model_id": res_model_id,
+        "res_id": lead_id,
+        "activity_type_id": activity_type_id,
+        "summary": summary,
+        "date_deadline": date_deadline,
+        "user_id": user_id,
+    }
+
+    note = activity_vals.get("note")
+    if note:
+        create_vals["note"] = str(note)
+
+    return execute_kw(
+        uid,
+        ACTIVITY_MODEL,
+        "create",
+        args=[[create_vals]],
+    )
