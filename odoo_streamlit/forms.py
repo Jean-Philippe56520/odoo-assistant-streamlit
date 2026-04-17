@@ -33,19 +33,16 @@ def validate_form(raw_data: dict[str, Any]):
     """
     Validation globale du formulaire.
 
-    - Valide les champs lead via lead_service.validate_lead_data
-    - Valide les champs activité localement
-    - Retourne une structure cleaned_data prête à être utilisée ensuite
+    - erreurs bloquantes : empêchent la prévisualisation / création
+    - avertissements : signalent un point à vérifier mais n'empêchent pas d'avancer
+    - retourne cleaned_data prêt à être utilisé ensuite
     """
     result = validate_lead_data(raw_data)
     cleaned_data = dict(result.cleaned_data)
-    errors = list(result.errors)
+    blocking_errors = list(result.blocking_errors)
+    warnings = list(result.warnings)
 
-    activity_data, activity_errors = _validate_activity_data(raw_data)
-    cleaned_data.update(activity_data)
-    errors.extend(activity_errors)
-
-    return errors, cleaned_data
+    return blocking_errors, warnings, cleaned_data
 
 
 def render_lead_form(seller_names):
@@ -110,7 +107,7 @@ def render_lead_form(seller_names):
             key="zip",
         )
         city = st.text_input(
-            "Ville",
+            "Ville *",
             value=form_data["city"],
             key="city",
         )
