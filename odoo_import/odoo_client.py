@@ -14,6 +14,7 @@ from .config import (
     TAG_MODEL,
     TEAM_MODEL,
     USER_MODEL,
+    get_missing_odoo_settings,
 )
 from .console_utils import ERR, DIM
 
@@ -58,11 +59,6 @@ class TimeoutSafeTransport(xmlrpc.client.SafeTransport):
         return connection
 
 
-COMMON_ENDPOINT = f"{ODOO_URL}/xmlrpc/2/common"
-OBJECT_ENDPOINT = f"{ODOO_URL}/xmlrpc/2/object"
-URL_SCHEME = urlparse(ODOO_URL).scheme.lower()
-
-
 RETRYABLE_EXCEPTIONS = (
     http.client.CannotSendRequest,
     http.client.ResponseNotReady,
@@ -74,15 +70,39 @@ RETRYABLE_EXCEPTIONS = (
 )
 
 
+def _validate_odoo_configuration():
+    missing = get_missing_odoo_settings()
+    if missing:
+        raise RuntimeError(
+            "Configuration Odoo manquante : " + ", ".join(missing)
+        )
+
+
+def _get_common_endpoint() -> str:
+    _validate_odoo_configuration()
+    return f"{ODOO_URL}/xmlrpc/2/common"
+
+
+def _get_object_endpoint() -> str:
+    _validate_odoo_configuration()
+    return f"{ODOO_URL}/xmlrpc/2/object"
+
+
+def _get_url_scheme() -> str:
+    if not ODOO_URL:
+        return ""
+    return urlparse(ODOO_URL).scheme.lower()
+
+
 def _build_transport():
-    if URL_SCHEME == "https":
+    if _get_url_scheme() == "https":
         return TimeoutSafeTransport()
     return TimeoutTransport()
 
 
 def _build_common_proxy():
     return xmlrpc.client.ServerProxy(
-        COMMON_ENDPOINT,
+        _get_common_endpoint(),
         allow_none=True,
         use_datetime=True,
         transport=_build_transport(),
@@ -91,7 +111,7 @@ def _build_common_proxy():
 
 def _build_object_proxy():
     return xmlrpc.client.ServerProxy(
-        OBJECT_ENDPOINT,
+        _get_object_endpoint(),
         allow_none=True,
         use_datetime=True,
         transport=_build_transport(),
@@ -106,6 +126,8 @@ def odoo_connect():
     - uid
     - models : proxy XML-RPC objet, conservé pour compatibilité
     """
+    _validate_odoo_configuration()
+
     common = _build_common_proxy()
     try:
         uid = common.authenticate(ODOO_DB, ODOO_USER, ODOO_API_KEY, {})
@@ -136,6 +158,8 @@ def execute_kw(
     Exécute un appel Odoo avec une nouvelle connexion XML-RPC à chaque appel.
     C'est le point clé pour éviter les CannotSendRequest sous Streamlit.
     """
+    _validate_odoo_configuration()
+
     args = args or []
     kwargs = kwargs or {}
     last_error: Optional[Exception] = None
