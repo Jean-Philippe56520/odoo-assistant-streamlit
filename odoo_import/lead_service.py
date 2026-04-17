@@ -31,7 +31,13 @@ ACTIVITY_TYPE_TO_XMLID_CANDIDATES = {
 @dataclass
 class ValidationResult:
     cleaned_data: dict
-    errors: list[str] = field(default_factory=list)
+    blocking_errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def errors(self) -> list[str]:
+        """Compatibilité descendante : errors = erreurs bloquantes."""
+        return self.blocking_errors
 
 
 @dataclass
@@ -125,26 +131,19 @@ def normalize_form_data(raw_data: dict) -> dict:
 
 
 def validate_lead_data(raw_data: dict) -> ValidationResult:
-    errors = []
+    blocking_errors: list[str] = []
+    warnings: list[str] = []
 
-    ok, msg, phone = validate_phone(raw_data.get("phone", ""))
-    if not ok:
-        errors.append(msg)
-
-    ok, msg, mobile = validate_phone(raw_data.get("mobile", ""))
-    if not ok:
-        errors.append(msg)
-
-    ok, msg, email_from = validate_email(raw_data.get("email_from", ""))
-    if not ok:
-        errors.append(msg)
+    phone_ok, _phone_msg, _ = validate_phone(raw_data.get("phone", ""))
+    mobile_ok, _mobile_msg, _ = validate_phone(raw_data.get("mobile", ""))
+    email_ok, _email_msg, _ = validate_email(raw_data.get("email_from", ""))
 
     data = {
         "partner_name": normalize_text(raw_data.get("partner_name")),
         "contact_name": normalize_text(raw_data.get("contact_name")),
-        "phone": phone if phone is not None else "",
-        "mobile": mobile if mobile is not None else "",
-        "email_from": email_from if email_from is not None else "",
+        "phone": normalize_phone(raw_data.get("phone")),
+        "mobile": normalize_phone(raw_data.get("mobile")),
+        "email_from": normalize_text(raw_data.get("email_from")),
         "street": normalize_text(raw_data.get("street")),
         "street2": normalize_text(raw_data.get("street2")),
         "zip": normalize_text(raw_data.get("zip")),
@@ -154,16 +153,37 @@ def validate_lead_data(raw_data: dict) -> ValidationResult:
     }
 
     if not data["partner_name"]:
-        errors.append("Le nom de l'entreprise est obligatoire.")
+        blocking_errors.append("Nom de l'entreprise manquant : ce champ est obligatoire.")
+
+    if not data["city"]:
+        blocking_errors.append("Ville manquante : ce champ est obligatoire.")
+
+    if data["phone"] and not phone_ok:
+        warnings.append("Téléphone : numéro trop court ou format inhabituel.")
+
+    if data["mobile"] and not mobile_ok:
+        warnings.append("Mobile : numéro trop court ou format inhabituel.")
+
+    if data["email_from"] and not email_ok:
+        warnings.append("Email : format probablement invalide.")
+    elif email_ok:
+        data["email_from"] = normalize_email(data["email_from"])
+
+    if not data["street"]:
+        warnings.append("Adresse non renseignée.")
 
     if not ensure_minimum_contact(data):
-        errors.append("Il faut au moins un moyen de contact : téléphone, mobile ou email.")
+        warnings.append("Aucun moyen de contact renseigné (téléphone, mobile ou email).")
 
     activity_data, activity_errors = normalize_activity_data(raw_data)
     data.update(activity_data)
-    errors.extend(activity_errors)
+    blocking_errors.extend(activity_errors)
 
-    return ValidationResult(cleaned_data=data, errors=errors)
+    return ValidationResult(
+        cleaned_data=data,
+        blocking_errors=blocking_errors,
+        warnings=warnings,
+    )
 
 
 def build_title(data):
@@ -465,12 +485,12 @@ def prepare_lead_preview(
     audit_mode="prévisualisation",
 ):
     validation = validate_lead_data(raw_data)
-    if validation.errors:
+    if validation.blocking_errors:
         return LeadPreviewResult(
             is_valid=False,
             cleaned_data=validation.cleaned_data,
             vals=None,
-            errors=validation.errors,
+            errors=validation.blocking_errors,
             existing_match=None,
         )
 
