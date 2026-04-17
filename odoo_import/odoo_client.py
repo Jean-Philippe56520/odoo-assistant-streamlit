@@ -28,8 +28,6 @@ ACTIVITY_TYPE_MODEL = "mail.activity.type"
 
 
 class TimeoutTransport(xmlrpc.client.Transport):
-    """Transport XML-RPC HTTP avec timeout."""
-
     def __init__(self, timeout: int = XMLRPC_TIMEOUT_SECONDS, use_datetime: bool = False):
         super().__init__(use_datetime=use_datetime)
         self._timeout = timeout
@@ -44,8 +42,6 @@ class TimeoutTransport(xmlrpc.client.Transport):
 
 
 class TimeoutSafeTransport(xmlrpc.client.SafeTransport):
-    """Transport XML-RPC HTTPS avec timeout."""
-
     def __init__(self, timeout: int = XMLRPC_TIMEOUT_SECONDS, use_datetime: bool = False):
         super().__init__(use_datetime=use_datetime)
         self._timeout = timeout
@@ -73,9 +69,7 @@ RETRYABLE_EXCEPTIONS = (
 def _validate_odoo_configuration():
     missing = get_missing_odoo_settings()
     if missing:
-        raise RuntimeError(
-            "Configuration Odoo manquante : " + ", ".join(missing)
-        )
+        raise RuntimeError("Configuration Odoo manquante : " + ", ".join(missing))
 
 
 def _get_common_endpoint() -> str:
@@ -119,13 +113,6 @@ def _build_object_proxy():
 
 
 def odoo_connect():
-    """
-    Authentifie l'utilisateur Odoo.
-
-    Retourne :
-    - uid
-    - models : proxy XML-RPC objet, conservé pour compatibilité
-    """
     _validate_odoo_configuration()
 
     common = _build_common_proxy()
@@ -154,10 +141,6 @@ def execute_kw(
     args: Optional[list] = None,
     kwargs: Optional[dict] = None,
 ):
-    """
-    Exécute un appel Odoo avec une nouvelle connexion XML-RPC à chaque appel.
-    C'est le point clé pour éviter les CannotSendRequest sous Streamlit.
-    """
     _validate_odoo_configuration()
 
     args = args or []
@@ -192,10 +175,6 @@ def execute_kw(
 
 
 def find_or_create_tag(models, uid, tag_name: str) -> int:
-    """
-    Le paramètre 'models' est conservé pour compatibilité,
-    mais n'est plus utilisé.
-    """
     tag_name = str(tag_name or "").strip()
     if not tag_name:
         raise ValueError("Le nom du tag est vide.")
@@ -208,21 +187,18 @@ def find_or_create_tag(models, uid, tag_name: str) -> int:
         kwargs={"limit": 1},
     )
     if ids:
-        return ids[0]
+        return _normalize_record_id(ids[0])
 
-    return execute_kw(
+    created = execute_kw(
         uid,
         TAG_MODEL,
         "create",
         args=[[{"name": tag_name}]],
     )
+    return _normalize_record_id(created)
 
 
 def find_team_ventes(models, uid):
-    """
-    Le paramètre 'models' est conservé pour compatibilité,
-    mais n'est plus utilisé.
-    """
     ids = execute_kw(
         uid,
         TEAM_MODEL,
@@ -230,14 +206,10 @@ def find_team_ventes(models, uid):
         args=[[("name", "ilike", "Ventes")]],
         kwargs={"limit": 1},
     )
-    return ids[0] if ids else None
+    return _normalize_record_id(ids[0]) if ids else None
 
 
 def get_active_sales_users(models, uid):
-    """
-    Le paramètre 'models' est conservé pour compatibilité,
-    mais n'est plus utilisé.
-    """
     return execute_kw(
         uid,
         USER_MODEL,
@@ -248,10 +220,6 @@ def get_active_sales_users(models, uid):
 
 
 def lead_exists(models, uid, email, phone, mobile=None):
-    """
-    Le paramètre 'models' est conservé pour compatibilité,
-    mais n'est plus utilisé.
-    """
     email = (email or "").strip()
     phone = (phone or "").strip()
     mobile = (mobile or "").strip()
@@ -279,14 +247,10 @@ def lead_exists(models, uid, email, phone, mobile=None):
         args=[domain],
         kwargs={"limit": 1},
     )
-    return ids[0] if ids else False
+    return _normalize_record_id(ids[0]) if ids else False
 
 
 def get_model_id_by_name(uid: int, model_name: str) -> int:
-    """
-    Retourne l'ID de ir.model pour un modèle technique donné.
-    Exemple : crm.lead
-    """
     ids = execute_kw(
         uid,
         "ir.model",
@@ -296,13 +260,10 @@ def get_model_id_by_name(uid: int, model_name: str) -> int:
     )
     if not ids:
         raise RuntimeError(f"Modèle Odoo introuvable dans ir.model : {model_name}")
-    return ids[0]
+    return _normalize_record_id(ids[0])
 
 
 def resolve_activity_type_by_name(uid: int, activity_type_name: str) -> int | None:
-    """
-    Recherche souple d'un type d'activité Odoo par nom.
-    """
     activity_type_name = str(activity_type_name or "").strip()
     if not activity_type_name:
         return None
@@ -315,7 +276,7 @@ def resolve_activity_type_by_name(uid: int, activity_type_name: str) -> int | No
         kwargs={"limit": 1},
     )
     if ids:
-        return ids[0]
+        return _normalize_record_id(ids[0])
 
     ids = execute_kw(
         uid,
@@ -325,15 +286,12 @@ def resolve_activity_type_by_name(uid: int, activity_type_name: str) -> int | No
         kwargs={"limit": 1},
     )
     if ids:
-        return ids[0]
+        return _normalize_record_id(ids[0])
 
     return None
 
 
 def get_default_todo_activity_type_id(uid: int) -> int | None:
-    """
-    Fallback pour récupérer un type d'activité To-Do / Tâche si non résolu plus tôt.
-    """
     for candidate in ("To-Do", "Tâche", "Todo"):
         activity_type_id = resolve_activity_type_by_name(uid, candidate)
         if activity_type_id:
@@ -342,27 +300,17 @@ def get_default_todo_activity_type_id(uid: int) -> int | None:
 
 
 def create_activity_for_lead(uid: int, lead_id: int, activity_vals: dict) -> int:
-    """
-    Crée une activité Odoo liée à un crm.lead.
-
-    activity_vals attendu :
-    {
-        "summary": "...",
-        "date_deadline": "YYYY-MM-DD",
-        "user_id": 12,
-        "activity_type_id": 4,                 # optionnel mais recommandé
-        "_activity_type_label": "To-Do"       # optionnel, fallback de résolution
-    }
-    """
     if not lead_id:
         raise ValueError("lead_id manquant pour la création d'activité.")
 
     if not activity_vals:
         raise ValueError("activity_vals vide.")
 
+    lead_id = _normalize_record_id(lead_id)
+
     summary = str(activity_vals.get("summary") or "").strip()
     date_deadline = str(activity_vals.get("date_deadline") or "").strip()
-    user_id = activity_vals.get("user_id")
+    user_id = _normalize_record_id(activity_vals.get("user_id"))
     activity_type_id = activity_vals.get("activity_type_id")
     activity_type_label = str(activity_vals.get("_activity_type_label") or "").strip()
 
@@ -370,8 +318,6 @@ def create_activity_for_lead(uid: int, lead_id: int, activity_vals: dict) -> int
         raise ValueError("Le résumé de l'activité est obligatoire.")
     if not date_deadline:
         raise ValueError("La date d'échéance de l'activité est obligatoire.")
-    if not user_id:
-        raise ValueError("Le user_id de l'activité est obligatoire.")
 
     if not activity_type_id:
         if activity_type_label:
@@ -382,6 +328,7 @@ def create_activity_for_lead(uid: int, lead_id: int, activity_vals: dict) -> int
     if not activity_type_id:
         raise RuntimeError("Impossible de résoudre un type d'activité Odoo valide.")
 
+    activity_type_id = _normalize_record_id(activity_type_id)
     res_model_id = get_model_id_by_name(uid, LEAD_MODEL)
 
     create_vals = {
@@ -397,9 +344,52 @@ def create_activity_for_lead(uid: int, lead_id: int, activity_vals: dict) -> int
     if note:
         create_vals["note"] = str(note)
 
-    return execute_kw(
+    created = execute_kw(
         uid,
         ACTIVITY_MODEL,
         "create",
         args=[[create_vals]],
     )
+    return _normalize_record_id(created)
+
+
+def _normalize_record_id(value) -> int:
+    """
+    Sécurise tous les IDs venant d'Odoo / XML-RPC.
+    Accepte :
+    - 21101
+    - "21101"
+    - [21101]
+    - ("21101",)
+    """
+    if isinstance(value, int):
+        return value
+
+    if isinstance(value, list):
+        if not value:
+            raise ValueError("ID Odoo vide.")
+        if len(value) != 1:
+            raise ValueError(f"ID Odoo invalide (liste multiple) : {value}")
+        return _normalize_record_id(value[0])
+
+    if isinstance(value, tuple):
+        if not value:
+            raise ValueError("ID Odoo vide.")
+        if len(value) != 1:
+            raise ValueError(f"ID Odoo invalide (tuple multiple) : {value}")
+        return _normalize_record_id(value[0])
+
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            raise ValueError("ID Odoo vide.")
+
+        if raw.startswith("[") and raw.endswith("]"):
+            inner = raw[1:-1].strip()
+            if not inner:
+                raise ValueError("ID Odoo vide.")
+            return _normalize_record_id(inner)
+
+        return int(raw)
+
+    raise ValueError(f"Format d'ID Odoo non géré : {value!r}")
