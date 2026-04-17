@@ -313,7 +313,6 @@ def resolve_activity_type_id(uid: int, activity_type_label: str) -> int | None:
         if activity_type_id:
             return activity_type_id
 
-    # fallback par nom
     ids = execute_kw(
         uid,
         "mail.activity.type",
@@ -324,7 +323,6 @@ def resolve_activity_type_id(uid: int, activity_type_label: str) -> int | None:
     if ids:
         return ids[0]
 
-    # fallback souple
     ids = execute_kw(
         uid,
         "mail.activity.type",
@@ -518,7 +516,9 @@ def prepare_lead_preview(
 
 def create_new_lead(models, uid, vals):
     lead_vals = _extract_lead_vals(vals)
-    lead_id = execute_kw(uid, LEAD_MODEL, "create", args=[[lead_vals]])
+    raw_lead_id = execute_kw(uid, LEAD_MODEL, "create", args=[[lead_vals]])
+    lead_id = _normalize_record_id(raw_lead_id)
+
     return LeadActionResult(
         success=True,
         action="create",
@@ -528,8 +528,11 @@ def create_new_lead(models, uid, vals):
 
 
 def update_existing_lead(models, uid, lead_id, vals):
+    lead_id = _normalize_record_id(lead_id)
     lead_vals = _extract_lead_vals(vals)
+
     execute_kw(uid, LEAD_MODEL, "write", args=[[lead_id], lead_vals])
+
     return LeadActionResult(
         success=True,
         action="update",
@@ -539,12 +542,47 @@ def update_existing_lead(models, uid, lead_id, vals):
 
 
 def _extract_lead_vals(vals: dict) -> dict:
-    """
-    Retire les métadonnées internes qui ne doivent jamais partir dans crm.lead.
-    """
     clean = dict(vals)
     clean.pop("_activity_vals", None)
     return clean
+
+
+def _normalize_record_id(value) -> int:
+    """
+    Sécurise les IDs renvoyés par XML-RPC.
+    Odoo renvoie normalement un int, mais on a observé ici des listes du type [21101].
+    """
+    if isinstance(value, int):
+        return value
+
+    if isinstance(value, list):
+        if not value:
+            raise ValueError("ID Odoo vide.")
+        if len(value) != 1:
+            raise ValueError(f"ID Odoo invalide (liste multiple) : {value}")
+        return _normalize_record_id(value[0])
+
+    if isinstance(value, tuple):
+        if not value:
+            raise ValueError("ID Odoo vide.")
+        if len(value) != 1:
+            raise ValueError(f"ID Odoo invalide (tuple multiple) : {value}")
+        return _normalize_record_id(value[0])
+
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            raise ValueError("ID Odoo vide.")
+
+        if raw.startswith("[") and raw.endswith("]"):
+            inner = raw[1:-1].strip()
+            if not inner:
+                raise ValueError("ID Odoo vide.")
+            return _normalize_record_id(inner)
+
+        return int(raw)
+
+    raise ValueError(f"Format d'ID Odoo non géré : {value!r}")
 
 
 def _coerce_to_date(value: Any) -> date | None:
