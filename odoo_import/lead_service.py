@@ -1,13 +1,31 @@
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime, timedelta
+from typing import Any, Optional
 
 from .config import LEAD_MODEL
 from .odoo_client import execute_kw, find_or_create_tag, lead_exists
 
 
 PROSPECTION_TAG = "Prospection"
+
+DEFAULT_ACTIVITY_TYPE = "To-Do"
+DEFAULT_ACTIVITY_SUMMARY = "Relance commerciale"
+DEFAULT_ACTIVITY_DATE_MODE = "J+7"
+
+ACTIVITY_TYPE_TO_XMLID_CANDIDATES = {
+    "To-Do": [
+        "mail.mail_activity_data_todo",
+    ],
+    "Appel": [
+        "mail.mail_activity_data_call",
+    ],
+    "Email": [
+        "mail.mail_activity_data_email",
+    ],
+}
 
 
 @dataclass
@@ -87,7 +105,7 @@ def normalize_form_data(raw_data: dict) -> dict:
     mobile_ok, _, mobile = validate_phone(raw_data.get("mobile", ""))
     email_ok, _, email_from = validate_email(raw_data.get("email_from", ""))
 
-    return {
+    base = {
         "partner_name": normalize_text(raw_data.get("partner_name")),
         "contact_name": normalize_text(raw_data.get("contact_name")),
         "phone": phone if phone_ok else normalize_text(raw_data.get("phone")),
@@ -100,6 +118,10 @@ def normalize_form_data(raw_data: dict) -> dict:
         "current_equipment": normalize_text(raw_data.get("current_equipment")),
         "free_comment": normalize_text(raw_data.get("free_comment")),
     }
+
+    activity_data, _ = normalize_activity_data(raw_data)
+    base.update(activity_data)
+    return base
 
 
 def validate_lead_data(raw_data: dict) -> ValidationResult:
@@ -136,6 +158,10 @@ def validate_lead_data(raw_data: dict) -> ValidationResult:
 
     if not ensure_minimum_contact(data):
         errors.append("Il faut au moins un moyen de contact : téléphone, mobile ou email.")
+
+    activity_data, activity_errors = normalize_activity_data(raw_data)
+    data.update(activity_data)
+    errors.extend(activity_errors)
 
     return ValidationResult(cleaned_data=data, errors=errors)
 
@@ -183,9 +209,13 @@ def merge_descriptions(existing_description, data):
 
 def add_audit_trail(vals, actor_user=None, seller_name=None, mode=None):
     stamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+    actor_text = normalize_text(actor_user) or "-"
+    seller_text = normalize_text(seller_name) or "-"
     audit_block = (
         f"Action : {mode or '-'}\n"
-        f"Date : {stamp}"
+        f"Date : {stamp}\n"
+        f"Compte connecté : {actor_text}\n"
+        f"Commercial affecté : {seller_text}"
     )
 
     current_description = normalize_text(vals.get("description"))
@@ -235,7 +265,160 @@ def build_vals_from_answers(data, team_id, seller_user_id, replace_tags=True, ex
         tag_id = find_or_create_tag(None, uid, PROSPECTION_TAG)
         vals["tag_ids"] = [(6, 0, [tag_id])] if replace_tags else [(4, tag_id)]
 
+    activity_vals = build_activity_vals_from_answers(
+        data=data,
+        seller_user_id=seller_user_id,
+        uid=uid,
+    )
+    if activity_vals:
+        vals["_activity_vals"] = activity_vals
+
     return vals
+
+
+def build_activity_vals_from_answers(data: dict, seller_user_id: int, uid: int | None = None) -> dict | None:
+    if not data.get("create_activity"):
+        return None
+
+    deadline = normalize_text(data.get("activity_deadline"))
+    if not deadline:
+        return None
+
+    activity_type_label = normalize_text(data.get("activity_type")) or DEFAULT_ACTIVITY_TYPE
+    summary = normalize_text(data.get("activity_summary")) or DEFAULT_ACTIVITY_SUMMARY
+
+    activity_type_id = None
+    if uid is not None:
+        activity_type_id = resolve_activity_type_id(uid, activity_type_label)
+
+    vals = {
+        "res_model": LEAD_MODEL,
+        "user_id": seller_user_id,
+        "summary": summary,
+        "date_deadline": deadline,
+        "_activity_type_label": activity_type_label,
+    }
+
+    if activity_type_id:
+        vals["activity_type_id"] = activity_type_id
+
+    return vals
+
+
+def resolve_activity_type_id(uid: int, activity_type_label: str) -> int | None:
+    xmlids = ACTIVITY_TYPE_TO_XMLID_CANDIDATES.get(activity_type_label, [])
+
+    for xmlid in xmlids:
+        activity_type_id = _resolve_xmlid_to_res_id(uid, xmlid)
+        if activity_type_id:
+            return activity_type_id
+
+    # fallback par nom
+    ids = execute_kw(
+        uid,
+        "mail.activity.type",
+        "search",
+        args=[[("name", "=", activity_type_label)]],
+        kwargs={"limit": 1},
+    )
+    if ids:
+        return ids[0]
+
+    # fallback souple
+    ids = execute_kw(
+        uid,
+        "mail.activity.type",
+        "search",
+        args=[[("name", "ilike", activity_type_label)]],
+        kwargs={"limit": 1},
+    )
+    if ids:
+        return ids[0]
+
+    return None
+
+
+def _resolve_xmlid_to_res_id(uid: int, xmlid: str) -> int | None:
+    try:
+        model_name, record_name = xmlid.split(".", 1)
+    except ValueError:
+        return None
+
+    ids = execute_kw(
+        uid,
+        "ir.model.data",
+        "search",
+        args=[[("module", "=", model_name), ("name", "=", record_name)]],
+        kwargs={"limit": 1},
+    )
+    if not ids:
+        return None
+
+    rows = execute_kw(
+        uid,
+        "ir.model.data",
+        "read",
+        args=[ids],
+        kwargs={"fields": ["res_id"]},
+    )
+    if not rows:
+        return None
+
+    res_id = rows[0].get("res_id")
+    return int(res_id) if res_id else None
+
+
+def normalize_activity_data(raw_data: dict) -> tuple[dict, list[str]]:
+    errors: list[str] = []
+
+    create_activity = bool(raw_data.get("create_activity", False))
+    activity_type = normalize_text(raw_data.get("activity_type")) or DEFAULT_ACTIVITY_TYPE
+    activity_summary = normalize_text(raw_data.get("activity_summary")) or DEFAULT_ACTIVITY_SUMMARY
+    activity_date_mode = normalize_text(raw_data.get("activity_date_mode")) or DEFAULT_ACTIVITY_DATE_MODE
+
+    if not create_activity:
+        return {
+            "create_activity": False,
+            "activity_type": DEFAULT_ACTIVITY_TYPE,
+            "activity_summary": DEFAULT_ACTIVITY_SUMMARY,
+            "activity_date_mode": DEFAULT_ACTIVITY_DATE_MODE,
+            "activity_custom_date": None,
+            "activity_deadline": None,
+        }, errors
+
+    if activity_type not in ("To-Do", "Appel", "Email"):
+        errors.append("Le type d'activité est invalide.")
+
+    if not activity_summary:
+        errors.append("Le résumé de l'activité est obligatoire.")
+
+    if activity_date_mode not in ("J+7", "J+30", "Choisir une date"):
+        errors.append("Le mode de date de relance est invalide.")
+        activity_date_mode = DEFAULT_ACTIVITY_DATE_MODE
+
+    custom_date = raw_data.get("activity_custom_date")
+    deadline = None
+
+    if activity_date_mode == "J+7":
+        deadline = date.today() + timedelta(days=7)
+    elif activity_date_mode == "J+30":
+        deadline = date.today() + timedelta(days=30)
+    elif activity_date_mode == "Choisir une date":
+        deadline = _coerce_to_date(custom_date)
+        if deadline is None:
+            errors.append("La date personnalisée de relance est invalide.")
+
+    if deadline and deadline < date.today():
+        errors.append("La date de relance ne peut pas être dans le passé.")
+
+    return {
+        "create_activity": True,
+        "activity_type": activity_type,
+        "activity_summary": activity_summary,
+        "activity_date_mode": activity_date_mode,
+        "activity_custom_date": deadline if activity_date_mode == "Choisir une date" else None,
+        "activity_deadline": deadline.isoformat() if deadline else None,
+    }, errors
 
 
 def detect_existing_lead(models, uid, data):
@@ -334,7 +517,8 @@ def prepare_lead_preview(
 
 
 def create_new_lead(models, uid, vals):
-    lead_id = execute_kw(uid, LEAD_MODEL, "create", args=[[vals]])
+    lead_vals = _extract_lead_vals(vals)
+    lead_id = execute_kw(uid, LEAD_MODEL, "create", args=[[lead_vals]])
     return LeadActionResult(
         success=True,
         action="create",
@@ -344,10 +528,44 @@ def create_new_lead(models, uid, vals):
 
 
 def update_existing_lead(models, uid, lead_id, vals):
-    execute_kw(uid, LEAD_MODEL, "write", args=[[lead_id], vals])
+    lead_vals = _extract_lead_vals(vals)
+    execute_kw(uid, LEAD_MODEL, "write", args=[[lead_id], lead_vals])
     return LeadActionResult(
         success=True,
         action="update",
         lead_id=lead_id,
         message=f"Piste mise à jour (ID {lead_id})",
     )
+
+
+def _extract_lead_vals(vals: dict) -> dict:
+    """
+    Retire les métadonnées internes qui ne doivent jamais partir dans crm.lead.
+    """
+    clean = dict(vals)
+    clean.pop("_activity_vals", None)
+    return clean
+
+
+def _coerce_to_date(value: Any) -> date | None:
+    if value is None:
+        return None
+
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+
+    if isinstance(value, datetime):
+        return value.date()
+
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except ValueError:
+                continue
+
+    return None
