@@ -20,14 +20,19 @@ from odoo_streamlit.views import render_banner, render_page_header, show_existin
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
 
 
-def render_form_errors():
+def render_form_messages():
     errors = st.session_state.get("form_errors") or []
-    if not errors:
-        return
+    warnings = st.session_state.get("form_warnings") or []
 
-    st.error("Le formulaire contient des erreurs.")
-    for error in errors:
-        st.write(f"- {error}")
+    if errors:
+        st.error("Prévisualisation bloquée : corrigez les points suivants.")
+        for error in errors:
+            st.write(f"- {error}")
+
+    if warnings:
+        st.warning("Prévisualisation autorisée, mais vérifiez les points suivants.")
+        for warning in warnings:
+            st.write(f"- {warning}")
 
 
 require_simple_auth()
@@ -38,7 +43,7 @@ apply_pending_resets()
 
 render_page_header()
 render_banner()
-render_form_errors()
+render_form_messages()
 
 try:
     uid, models = get_odoo()
@@ -61,11 +66,13 @@ if submitted:
     st.session_state["result_banner"] = None
     st.session_state["form_data"] = raw_data
     st.session_state["form_errors"] = []
+    st.session_state["form_warnings"] = []
 
-    errors, clean_data = validate_form(raw_data)
+    blocking_errors, warnings, clean_data = validate_form(raw_data)
 
-    if errors:
-        st.session_state["form_errors"] = errors
+    if blocking_errors:
+        st.session_state["form_errors"] = blocking_errors
+        st.session_state["form_warnings"] = warnings
         request_preview_reset()
         st.rerun()
 
@@ -78,6 +85,7 @@ if submitted:
 
     if not preview.is_valid:
         st.session_state["form_errors"] = preview.errors or ["La prévisualisation a échoué."]
+        st.session_state["form_warnings"] = warnings
         request_preview_reset()
         st.rerun()
 
@@ -88,6 +96,7 @@ if submitted:
     st.session_state["seller_name"] = seller_name
     st.session_state["seller_user_id"] = seller_options[seller_name]
     st.session_state["form_errors"] = []
+    st.session_state["form_warnings"] = warnings
 
     st.rerun()
 
