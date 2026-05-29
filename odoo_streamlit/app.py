@@ -19,12 +19,16 @@ from odoo_streamlit.services import compute_preview, get_odoo, get_sales_users, 
 from odoo_streamlit.state import apply_pending_resets, init_state, request_preview_reset
 from odoo_streamlit.views import (
     render_banner,
-    render_debug_events,
     render_draft_recovery,
     render_page_header,
     show_existing,
     show_preview,
 )
+try:
+    from odoo_streamlit.views import render_debug_events
+except ImportError:
+    def render_debug_events():
+        return None
 
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
 
