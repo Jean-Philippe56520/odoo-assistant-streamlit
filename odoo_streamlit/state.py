@@ -58,6 +58,11 @@ def init_state():
         "pending_preview_reset": False,
         "form_errors": [],
         "form_warnings": [],
+        "last_unsent_draft": None,
+        "last_unsent_vals": None,
+        "last_created_lead_id": None,
+        "draft_restored": False,
+        "debug_events": [],
     }
 
     for key, value in defaults.items():

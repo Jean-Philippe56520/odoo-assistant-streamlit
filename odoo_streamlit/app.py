@@ -10,12 +10,21 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
 from odoo_streamlit.actions import process_create_action, process_duplicate_action
+from odoo_streamlit.constants import FORM_FIELD_KEYS
+from odoo_streamlit.debug import add_debug_event
 from odoo_streamlit.auth import render_logout, require_simple_auth
 from odoo_streamlit.constants import APP_STATE_KEYS
 from odoo_streamlit.forms import render_lead_form, validate_form
 from odoo_streamlit.services import compute_preview, get_odoo, get_sales_users, get_team_id
 from odoo_streamlit.state import apply_pending_resets, init_state, request_preview_reset
-from odoo_streamlit.views import render_banner, render_page_header, show_existing, show_preview
+from odoo_streamlit.views import (
+    render_banner,
+    render_debug_events,
+    render_draft_recovery,
+    render_page_header,
+    show_existing,
+    show_preview,
+)
 
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
 
@@ -35,6 +44,31 @@ def render_form_messages():
             st.write(f"- {warning}")
 
 
+def restore_last_unsent_draft(draft):
+    st.session_state["form_data"] = dict(draft)
+
+    for key in FORM_FIELD_KEYS:
+        if key in draft:
+            st.session_state[key] = draft[key]
+
+    st.session_state["draft_restored"] = True
+    st.session_state["result_banner"] = {
+        "status": "warning",
+        "message": "Brouillon restauré. Vérifiez les informations avant de prévisualiser à nouveau.",
+    }
+    add_debug_event("draft_restored", {"partner_name": draft.get("partner_name"), "city": draft.get("city")})
+    request_preview_reset()
+    st.rerun()
+
+
+def ignore_last_unsent_draft():
+    st.session_state["last_unsent_draft"] = None
+    st.session_state["last_unsent_vals"] = None
+    st.session_state["draft_restored"] = False
+    add_debug_event("draft_ignored")
+    st.rerun()
+
+
 require_simple_auth()
 render_logout(APP_STATE_KEYS)
 
@@ -44,6 +78,7 @@ apply_pending_resets()
 render_page_header()
 render_banner()
 render_form_messages()
+render_draft_recovery(restore_last_unsent_draft, ignore_last_unsent_draft)
 
 try:
     uid, models = get_odoo()
@@ -65,8 +100,10 @@ submitted, seller_name, raw_data = render_lead_form(seller_names)
 if submitted:
     st.session_state["result_banner"] = None
     st.session_state["form_data"] = raw_data
+    st.session_state["last_unsent_draft"] = dict(raw_data)
     st.session_state["form_errors"] = []
     st.session_state["form_warnings"] = []
+    add_debug_event("preview_submitted", {"partner_name": raw_data.get("partner_name"), "city": raw_data.get("city")})
 
     blocking_errors, warnings, clean_data = validate_form(raw_data)
 
@@ -76,16 +113,18 @@ if submitted:
         request_preview_reset()
         st.rerun()
 
-    preview = compute_preview(
-        clean_data,
-        seller_name,
-        seller_options[seller_name],
-        actor_user=st.session_state.get("auth_user", ""),
-    )
+    with st.spinner("Prévisualisation en cours. Ne fermez pas cette page..."):
+        preview = compute_preview(
+            clean_data,
+            seller_name,
+            seller_options[seller_name],
+            actor_user=st.session_state.get("auth_user", ""),
+        )
 
     if not preview.is_valid:
         st.session_state["form_errors"] = preview.errors or ["La prévisualisation a échoué."]
         st.session_state["form_warnings"] = warnings
+        add_debug_event("preview_failed", {"errors": st.session_state["form_errors"]})
         request_preview_reset()
         st.rerun()
 
@@ -97,6 +136,7 @@ if submitted:
     st.session_state["seller_user_id"] = seller_options[seller_name]
     st.session_state["form_errors"] = []
     st.session_state["form_warnings"] = warnings
+    add_debug_event("preview_success", {"existing_id": st.session_state["existing_id"]})
 
     st.rerun()
 
@@ -162,3 +202,6 @@ if preview_data and preview_vals:
             if st.button("Modifier la saisie", key="back_to_form_create"):
                 request_preview_reset()
                 st.rerun()
+
+
+render_debug_events()

@@ -112,6 +112,44 @@ def show_preview(preview_vals, raw_data, seller_name):
     st.write(f"**Étiquette :** {PROSPECTION_TAG}")
 
 
+def render_draft_recovery(on_restore, on_ignore):
+    draft = st.session_state.get("last_unsent_draft")
+    if not draft:
+        return
+
+    if st.session_state.get("preview_data"):
+        return
+
+    with st.expander("Brouillon de sécurité disponible", expanded=False):
+        st.warning(
+            "Une saisie récente est conservée en sécurité. "
+            "Vous pouvez la restaurer si le formulaire s'est vidé ou si l'envoi n'a pas abouti."
+        )
+
+        partner_name = draft.get("partner_name") or "-"
+        city = draft.get("city") or "-"
+        st.caption(f"Dernière saisie conservée : {partner_name} - {city}")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Restaurer ma dernière saisie", key="restore_last_unsent_draft"):
+                on_restore(draft)
+
+        with col2:
+            if st.button("Ignorer ce brouillon", key="ignore_last_unsent_draft"):
+                on_ignore()
+
+
+def render_debug_events():
+    events = st.session_state.get("debug_events") or []
+    if not events:
+        return
+
+    with st.expander("Diagnostic technique", expanded=False):
+        st.caption("Journal local de la session, utile pendant les tests terrain.")
+        st.write(events)
+
+
 def _format_deadline(value: Any) -> str:
     parsed = _coerce_to_date(value)
     if not parsed:

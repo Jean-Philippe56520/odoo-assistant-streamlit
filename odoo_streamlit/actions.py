@@ -7,6 +7,7 @@ from odoo_import.lead_service import (
     update_existing_lead,
 )
 from odoo_import.odoo_client import create_activity_for_lead
+from odoo_streamlit.debug import add_debug_event
 from odoo_streamlit.services import get_odoo
 from odoo_streamlit.state import request_full_reset
 
@@ -60,11 +61,15 @@ def process_duplicate_action(action, preview_data, existing_data, existing_id, t
             mode="mise à jour lead existant",
         )
 
-        result = update_lead(existing_id, vals)
+        _preserve_draft(preview_data, vals)
+        add_debug_event("lead_update_started", {"existing_id": existing_id})
 
-        activity_feedback = _try_create_activity(existing_id, vals)
+        with st.spinner("Mise à jour Odoo en cours. Ne fermez pas cette page..."):
+            result = update_lead(existing_id, vals)
 
         if result.success:
+            activity_feedback = _try_create_activity(existing_id, vals)
+
             if activity_feedback["status"] == "created":
                 _set_banner(
                     "success",
@@ -86,16 +91,24 @@ def process_duplicate_action(action, preview_data, existing_data, existing_id, t
                     "success",
                     f"Piste bien prise en compte par Odoo. Mise à jour confirmée (ID {result.lead_id}).",
                 )
-        else:
-            _set_banner(
-                "warning",
-                f"Mise à jour envoyée, mais confirmation Odoo incomplète. {result.message}",
-            )
 
-        request_full_reset(clear_banner=False)
+            add_debug_event("lead_update_success", {"lead_id": result.lead_id})
+            _clear_draft_after_success(result.lead_id)
+            request_full_reset(clear_banner=False)
+            st.rerun()
+
+        _set_banner(
+            "warning",
+            (
+                "La mise à jour n'a pas été confirmée dans Odoo. "
+                "Votre saisie a été conservée. Vous pouvez réessayer. "
+                f"Détail : {result.message}"
+            ),
+        )
+        add_debug_event("lead_update_failed", {"existing_id": existing_id, "message": result.message})
         st.rerun()
 
-    if action == "Créer un nouveau lead quand même":
+    elif action == "Créer un nouveau lead quand même":
         vals = build_vals_from_answers(
             preview_data,
             team_id,
@@ -110,7 +123,11 @@ def process_duplicate_action(action, preview_data, existing_data, existing_id, t
             mode="création nouveau lead malgré doublon",
         )
 
-        result = create_lead(vals)
+        _preserve_draft(preview_data, vals)
+        add_debug_event("lead_create_despite_duplicate_started", {"existing_id": existing_id})
+
+        with st.spinner("Envoi vers Odoo en cours. Ne fermez pas cette page..."):
+            result = create_lead(vals)
 
         if result.success:
             activity_feedback = _try_create_activity(result.lead_id, vals)
@@ -136,21 +153,31 @@ def process_duplicate_action(action, preview_data, existing_data, existing_id, t
                     "success",
                     f"Piste bien prise en compte par Odoo. Nouveau lead créé et confirmé (ID {result.lead_id}).",
                 )
-        else:
-            _set_banner(
-                "warning",
-                f"Création envoyée, mais confirmation Odoo incomplète. {result.message}",
-            )
 
-        request_full_reset(clear_banner=False)
+            add_debug_event("lead_create_despite_duplicate_success", {"lead_id": result.lead_id})
+            _clear_draft_after_success(result.lead_id)
+            request_full_reset(clear_banner=False)
+            st.rerun()
+
+        _set_banner(
+            "warning",
+            (
+                "La création n'a pas été confirmée dans Odoo. "
+                "Votre saisie a été conservée. Vous pouvez réessayer. "
+                f"Détail : {result.message}"
+            ),
+        )
+        add_debug_event("lead_create_despite_duplicate_failed", {"message": result.message})
         st.rerun()
 
-    _set_banner(
-        "warning",
-        "Opération annulée. Aucune piste n'a été créée ni modifiée.",
-    )
-    request_full_reset(clear_banner=False)
-    st.rerun()
+    else:
+        _set_banner(
+            "warning",
+            "Opération annulée. Aucune piste n'a été créée ni modifiée.",
+        )
+        add_debug_event("duplicate_action_cancelled", {"existing_id": existing_id})
+        request_full_reset(clear_banner=False)
+        st.rerun()
 
 
 def process_create_action(preview_data, team_id):
@@ -168,7 +195,11 @@ def process_create_action(preview_data, team_id):
         mode="création lead",
     )
 
-    result = create_lead(vals)
+    _preserve_draft(preview_data, vals)
+    add_debug_event("lead_create_started", {"partner_name": preview_data.get("partner_name"), "city": preview_data.get("city")})
+
+    with st.spinner("Envoi vers Odoo en cours. Ne fermez pas cette page..."):
+        result = create_lead(vals)
 
     if result.success:
         activity_feedback = _try_create_activity(result.lead_id, vals)
@@ -194,17 +225,34 @@ def process_create_action(preview_data, team_id):
                 "success",
                 f"Piste bien prise en compte par Odoo. Création confirmée (ID {result.lead_id}).",
             )
-    else:
-        _set_banner(
-            "warning",
-            (
-                "La création a été lancée, mais la confirmation Odoo n'a pas pu être relue. "
-                f"{result.message}"
-            ),
-        )
 
-    request_full_reset(clear_banner=False)
+        add_debug_event("lead_create_success", {"lead_id": result.lead_id})
+        _clear_draft_after_success(result.lead_id)
+        request_full_reset(clear_banner=False)
+        st.rerun()
+
+    _set_banner(
+        "warning",
+        (
+            "La création n'a pas été confirmée dans Odoo. "
+            "Votre saisie a été conservée. Vous pouvez réessayer. "
+            f"Détail : {result.message}"
+        ),
+    )
+    add_debug_event("lead_create_failed", {"message": result.message})
     st.rerun()
+
+
+def _preserve_draft(preview_data, vals):
+    st.session_state["last_unsent_draft"] = dict(preview_data or {})
+    st.session_state["last_unsent_vals"] = dict(vals or {})
+
+
+def _clear_draft_after_success(lead_id):
+    st.session_state["last_created_lead_id"] = lead_id
+    st.session_state["last_unsent_draft"] = None
+    st.session_state["last_unsent_vals"] = None
+    st.session_state["draft_restored"] = False
 
 
 def _try_create_activity(lead_id, vals):

@@ -18,6 +18,11 @@ APP_STATE_KEYS = (
     "result_banner",
     "pending_form_reset",
     "pending_preview_reset",
+    "last_unsent_draft",
+    "last_unsent_vals",
+    "last_created_lead_id",
+    "draft_restored",
+    "debug_events",
 )
 
 # Champs du formulaire principal
