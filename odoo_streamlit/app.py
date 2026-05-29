@@ -26,9 +26,9 @@ from odoo_streamlit.state import apply_pending_resets, init_state, request_previ
 from odoo_streamlit.views import (
     render_banner,
     render_debug_events,
-    render_draft_recovery,
     render_last_sent_recovery,
     render_local_draft_recovery,
+    render_scroll_to_top_if_requested,
     render_page_header,
     show_existing,
     show_preview,
@@ -113,12 +113,21 @@ def forget_last_sent_draft():
     st.session_state["last_sent_draft"] = None
     st.session_state["last_sent_lead_id"] = None
     st.session_state["last_sent_at"] = None
+    st.session_state["available_local_draft"] = None
+    # Quand l'utilisateur masque la reprise, on supprime aussi la copie navigateur
+    # pour éviter de réafficher le bloc au rechargement.
+    clear_local_draft()
     add_debug_event("last_sent_draft_hidden")
     st.rerun()
 
 
 def delete_local_draft():
     clear_local_draft()
+    st.session_state["last_sent_draft"] = None
+    st.session_state["last_sent_lead_id"] = None
+    st.session_state["last_sent_at"] = None
+    st.session_state["last_unsent_draft"] = None
+    st.session_state["last_unsent_vals"] = None
     add_debug_event("local_draft_deleted")
     st.rerun()
 
@@ -134,10 +143,10 @@ apply_pending_resets()
 render_page_header()
 render_banner()
 render_form_messages()
+render_scroll_to_top_if_requested()
 render_local_draft_recovery(restore_local_draft, delete_local_draft)
 if not st.session_state.get("available_local_draft"):
     render_last_sent_recovery(restore_local_draft, forget_last_sent_draft)
-render_draft_recovery(restore_last_unsent_draft, ignore_last_unsent_draft)
 
 try:
     uid, models = get_odoo()
@@ -170,20 +179,32 @@ if submitted:
     if blocking_errors:
         st.session_state["form_errors"] = blocking_errors
         st.session_state["form_warnings"] = warnings
+        st.session_state["scroll_to_top_requested"] = True
         request_preview_reset()
         st.rerun()
 
-    with st.spinner("Prévisualisation en cours. Ne fermez pas cette page..."):
-        preview = compute_preview(
-            clean_data,
-            seller_name,
-            seller_options[seller_name],
-            actor_user=st.session_state.get("auth_user", ""),
-        )
+    try:
+        with st.spinner("Prévisualisation en cours. Ne fermez pas cette page..."):
+            preview = compute_preview(
+                clean_data,
+                seller_name,
+                seller_options[seller_name],
+                actor_user=st.session_state.get("auth_user", ""),
+            )
+    except Exception as exc:
+        st.session_state["form_errors"] = [
+            "La prévisualisation n'a pas pu être générée. Votre saisie a été conservée."
+        ]
+        st.session_state["form_warnings"] = warnings
+        st.session_state["scroll_to_top_requested"] = True
+        add_debug_event("preview_exception", {"message": str(exc)})
+        request_preview_reset()
+        st.rerun()
 
     if not preview.is_valid:
         st.session_state["form_errors"] = preview.errors or ["La prévisualisation a échoué."]
         st.session_state["form_warnings"] = warnings
+        st.session_state["scroll_to_top_requested"] = True
         add_debug_event("preview_failed", {"errors": st.session_state["form_errors"]})
         request_preview_reset()
         st.rerun()

@@ -29,6 +29,7 @@ APP_STATE_KEYS = (
     "available_local_draft",
     "local_draft_available",
     "local_draft_error",
+    "scroll_to_top_requested",
 )
 
 # Champs du formulaire principal

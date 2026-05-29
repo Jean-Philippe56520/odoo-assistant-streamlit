@@ -4,6 +4,7 @@ from datetime import date, datetime
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from odoo_import.lead_service import PROSPECTION_TAG, build_title
 from odoo_streamlit.constants import APP_CAPTION, APP_TITLE
@@ -13,6 +14,29 @@ def render_page_header():
     st.title(APP_TITLE)
     st.caption(APP_CAPTION)
 
+
+
+def render_scroll_to_top_if_requested():
+    """Remonte la page uniquement quand une erreur bloquante le demande."""
+    if not st.session_state.get("scroll_to_top_requested"):
+        return
+
+    st.session_state["scroll_to_top_requested"] = False
+    components.html(
+        """
+        <script>
+        const scrollToTop = () => {
+            try {
+                window.parent.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch (e) {
+                window.parent.scrollTo(0, 0);
+            }
+        };
+        setTimeout(scrollToTop, 100);
+        </script>
+        """,
+        height=0,
+    )
 
 def render_banner():
     banner = st.session_state.get("result_banner")

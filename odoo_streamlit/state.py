@@ -69,6 +69,7 @@ def init_state():
         "available_local_draft": None,
         "local_draft_available": False,
         "local_draft_error": None,
+        "scroll_to_top_requested": False,
     }
 
     for key, value in defaults.items():
