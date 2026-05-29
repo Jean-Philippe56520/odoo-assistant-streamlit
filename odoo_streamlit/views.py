@@ -113,6 +113,38 @@ def show_preview(preview_vals, raw_data, seller_name):
 
 
 
+def render_last_sent_recovery(on_restore, on_forget):
+    """Affiche une reprise simple de la dernière saisie envoyée pendant la session courante."""
+    draft = st.session_state.get("last_sent_draft")
+    if not draft:
+        return
+
+    lead_id = st.session_state.get("last_sent_lead_id")
+    saved_at = _format_saved_at(st.session_state.get("last_sent_at"))
+    partner_name = draft.get("partner_name") or "-"
+    city = draft.get("city") or "-"
+
+    st.info(
+        (
+            f"Dernière saisie envoyée disponible : {partner_name} - {city}. "
+            f"Cette piste a déjà été confirmée dans Odoo"
+            f"{f' avec l’ID {lead_id}' if lead_id else ''}."
+        ),
+        icon="✅",
+    )
+    if saved_at:
+        st.caption(saved_at)
+    st.caption("Vous pouvez reprendre ces informations comme base d’une nouvelle saisie. Vérifiez avant de recréer.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Reprendre la dernière saisie", key="restore_last_sent_draft"):
+            on_restore({"status": "sent", "lead_id": lead_id, "data": draft})
+    with col2:
+        if st.button("Masquer cette reprise", key="forget_last_sent_draft"):
+            on_forget()
+
+
 def render_local_draft_recovery(on_restore, on_delete):
     payload = st.session_state.get("available_local_draft")
     if not payload:
@@ -129,39 +161,39 @@ def render_local_draft_recovery(on_restore, on_delete):
     city = data.get("city") or "-"
 
     if status == "sent":
-        title = "Dernière saisie envoyée retrouvée"
         lead_text = f" avec l'ID {lead_id}" if lead_id else ""
-        body = (
-            f"Cette saisie a déjà été confirmée dans Odoo{lead_text}. "
-            "Vous pouvez la reprendre comme base d'une nouvelle saisie, mais vérifiez avant de recréer."
+        st.info(
+            (
+                f"Dernière saisie envoyée retrouvée sur cet appareil : {partner_name} - {city}. "
+                f"Cette piste a déjà été confirmée dans Odoo{lead_text}."
+            ),
+            icon="✅",
         )
         button_label = "Reprendre cette saisie"
-        icon = "✅"
+        helper = "Vous pouvez la reprendre comme base d'une nouvelle saisie, mais vérifiez avant de recréer."
     else:
-        title = "Brouillon non envoyé retrouvé"
-        body = (
-            "Une saisie précédente a été retrouvée sur cet appareil. "
-            "Elle n'a peut-être pas été confirmée dans Odoo."
+        st.warning(
+            (
+                f"Brouillon non envoyé retrouvé sur cet appareil : {partner_name} - {city}. "
+                "Cette saisie n'a peut-être pas été confirmée dans Odoo."
+            ),
+            icon="📝",
         )
         button_label = "Restaurer le brouillon"
-        icon = "📝"
+        helper = "Utilisez ce bouton si le formulaire s'est vidé, si la page a rechargé ou si l'envoi a échoué."
 
-    with st.expander(f"{icon} {title}", expanded=(status != "sent")):
-        if status == "sent":
-            st.info(body)
-        else:
-            st.warning(body)
+    if saved_at:
+        st.caption(saved_at)
+    st.caption(helper)
+    st.caption("Ce brouillon est sauvegardé uniquement dans le navigateur de cet appareil.")
 
-        st.caption(f"Saisie sauvegardée : {partner_name} - {city}" + (f" | {saved_at}" if saved_at else ""))
-        st.caption("Ce brouillon est sauvegardé uniquement dans le navigateur de cet appareil.")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button(button_label, key="restore_local_browser_draft"):
-                on_restore(payload)
-        with col2:
-            if st.button("Supprimer ce brouillon", key="delete_local_browser_draft"):
-                on_delete()
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button(button_label, key="restore_local_browser_draft"):
+            on_restore(payload)
+    with col2:
+        if st.button("Supprimer ce brouillon", key="delete_local_browser_draft"):
+            on_delete()
 
 
 def render_draft_recovery(on_restore, on_ignore):

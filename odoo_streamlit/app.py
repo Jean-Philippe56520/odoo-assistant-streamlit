@@ -27,6 +27,7 @@ from odoo_streamlit.views import (
     render_banner,
     render_debug_events,
     render_draft_recovery,
+    render_last_sent_recovery,
     render_local_draft_recovery,
     render_page_header,
     show_existing,
@@ -108,6 +109,14 @@ def restore_local_draft(payload):
     st.rerun()
 
 
+def forget_last_sent_draft():
+    st.session_state["last_sent_draft"] = None
+    st.session_state["last_sent_lead_id"] = None
+    st.session_state["last_sent_at"] = None
+    add_debug_event("last_sent_draft_hidden")
+    st.rerun()
+
+
 def delete_local_draft():
     clear_local_draft()
     add_debug_event("local_draft_deleted")
@@ -126,6 +135,8 @@ render_page_header()
 render_banner()
 render_form_messages()
 render_local_draft_recovery(restore_local_draft, delete_local_draft)
+if not st.session_state.get("available_local_draft"):
+    render_last_sent_recovery(restore_local_draft, forget_last_sent_draft)
 render_draft_recovery(restore_last_unsent_draft, ignore_last_unsent_draft)
 
 try:

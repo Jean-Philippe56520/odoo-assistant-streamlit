@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import streamlit as st
 
 from odoo_import.lead_service import (
@@ -252,12 +254,16 @@ def _preserve_draft(preview_data, vals):
 
 
 def _clear_draft_after_success(lead_id, preview_data=None):
+    sent_draft = dict(preview_data or {}) if preview_data else None
     st.session_state["last_created_lead_id"] = lead_id
+    st.session_state["last_sent_draft"] = sent_draft
+    st.session_state["last_sent_lead_id"] = lead_id
+    st.session_state["last_sent_at"] = datetime.now().isoformat(timespec="seconds")
     st.session_state["last_unsent_draft"] = None
     st.session_state["last_unsent_vals"] = None
     st.session_state["draft_restored"] = False
-    if preview_data:
-        mark_local_draft_sent(dict(preview_data or {}), lead_id=lead_id)
+    if sent_draft:
+        mark_local_draft_sent(sent_draft, lead_id=lead_id)
 
 
 def _try_create_activity(lead_id, vals):
