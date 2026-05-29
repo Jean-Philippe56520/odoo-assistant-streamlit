@@ -17,7 +17,7 @@ def render_page_header():
 
 
 def render_scroll_to_top_if_requested():
-    """Remonte la page uniquement quand une erreur bloquante le demande."""
+    """Remonte la page quand une erreur bloquante ou un résultat d'envoi doit être vu."""
     if not st.session_state.get("scroll_to_top_requested"):
         return
 
@@ -25,18 +25,48 @@ def render_scroll_to_top_if_requested():
     components.html(
         """
         <script>
-        const scrollToTop = () => {
+        function forceScrollTop() {
             try {
-                window.parent.scrollTo({ top: 0, behavior: 'smooth' });
+                const parentWindow = window.parent;
+                const parentDocument = parentWindow.document;
+                const selectors = [
+                    'section.main',
+                    '[data-testid="stAppViewContainer"]',
+                    '[data-testid="stApp"]',
+                    '.main'
+                ];
+
+                try {
+                    parentWindow.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                } catch (e) {
+                    parentWindow.scrollTo(0, 0);
+                }
+
+                try { parentDocument.documentElement.scrollTop = 0; } catch (e) {}
+                try { parentDocument.body.scrollTop = 0; } catch (e) {}
+
+                selectors.forEach((selector) => {
+                    const element = parentDocument.querySelector(selector);
+                    if (!element) return;
+                    try {
+                        element.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                    } catch (e) {
+                        try { element.scrollTop = 0; } catch (_) {}
+                    }
+                });
             } catch (e) {
-                window.parent.scrollTo(0, 0);
+                try { window.scrollTo(0, 0); } catch (_) {}
             }
-        };
-        setTimeout(scrollToTop, 100);
+        }
+
+        setTimeout(forceScrollTop, 50);
+        setTimeout(forceScrollTop, 250);
+        setTimeout(forceScrollTop, 750);
         </script>
         """,
         height=0,
     )
+
 
 def render_banner():
     banner = st.session_state.get("result_banner")
@@ -221,31 +251,34 @@ def render_local_draft_recovery(on_restore, on_delete):
 
 
 def render_draft_recovery(on_restore, on_ignore):
+    """Affiche une reprise visible de la dernière saisie prévisualisée/conservée."""
     draft = st.session_state.get("last_unsent_draft")
     if not draft:
         return
 
-    if st.session_state.get("preview_data"):
-        return
+    partner_name = draft.get("partner_name") or "-"
+    city = draft.get("city") or "-"
 
-    with st.expander("Brouillon de sécurité disponible", expanded=False):
-        st.warning(
-            "Une saisie récente est conservée en sécurité. "
-            "Vous pouvez la restaurer si le formulaire s'est vidé ou si l'envoi n'a pas abouti."
-        )
+    st.warning(
+        (
+            f"Dernière saisie prévisualisée disponible : {partner_name} - {city}. "
+            "Elle a été conservée avant la prévisualisation."
+        ),
+        icon="📝",
+    )
+    st.caption(
+        "Utilisez ce bouton si le formulaire s'est vidé, si la prévisualisation a échoué "
+        "ou si vous voulez reprendre cette saisie."
+    )
 
-        partner_name = draft.get("partner_name") or "-"
-        city = draft.get("city") or "-"
-        st.caption(f"Dernière saisie conservée : {partner_name} - {city}")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Reprendre la dernière saisie", key="restore_last_unsent_draft"):
+            on_restore(draft)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Restaurer ma dernière saisie", key="restore_last_unsent_draft"):
-                on_restore(draft)
-
-        with col2:
-            if st.button("Ignorer ce brouillon", key="ignore_last_unsent_draft"):
-                on_ignore()
+    with col2:
+        if st.button("Masquer cette reprise", key="ignore_last_unsent_draft"):
+            on_ignore()
 
 
 def render_debug_events():

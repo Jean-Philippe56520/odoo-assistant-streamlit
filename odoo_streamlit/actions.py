@@ -304,3 +304,6 @@ def _set_banner(status, message):
         "status": status,
         "message": message,
     }
+    # Après une action d'envoi vers Odoo, le message de résultat doit être visible
+    # même si l'utilisateur est en bas de formulaire sur mobile.
+    st.session_state["scroll_to_top_requested"] = True

@@ -26,6 +26,7 @@ from odoo_streamlit.state import apply_pending_resets, init_state, request_previ
 from odoo_streamlit.views import (
     render_banner,
     render_debug_events,
+    render_draft_recovery,
     render_last_sent_recovery,
     render_local_draft_recovery,
     render_scroll_to_top_if_requested,
@@ -73,6 +74,8 @@ def ignore_last_unsent_draft():
     st.session_state["last_unsent_draft"] = None
     st.session_state["last_unsent_vals"] = None
     st.session_state["draft_restored"] = False
+    st.session_state["available_local_draft"] = None
+    clear_local_draft()
     add_debug_event("draft_ignored")
     st.rerun()
 
@@ -146,6 +149,8 @@ render_form_messages()
 render_scroll_to_top_if_requested()
 render_local_draft_recovery(restore_local_draft, delete_local_draft)
 if not st.session_state.get("available_local_draft"):
+    render_draft_recovery(restore_last_unsent_draft, ignore_last_unsent_draft)
+if not st.session_state.get("available_local_draft") and not st.session_state.get("last_unsent_draft"):
     render_last_sent_recovery(restore_local_draft, forget_last_sent_draft)
 
 try:
