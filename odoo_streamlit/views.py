@@ -112,6 +112,58 @@ def show_preview(preview_vals, raw_data, seller_name):
     st.write(f"**Étiquette :** {PROSPECTION_TAG}")
 
 
+
+def render_local_draft_recovery(on_restore, on_delete):
+    payload = st.session_state.get("available_local_draft")
+    if not payload:
+        return
+
+    data = payload.get("data") or {}
+    if not data:
+        return
+
+    status = payload.get("status")
+    lead_id = payload.get("lead_id")
+    saved_at = _format_saved_at(payload.get("saved_at"))
+    partner_name = data.get("partner_name") or "-"
+    city = data.get("city") or "-"
+
+    if status == "sent":
+        title = "Dernière saisie envoyée retrouvée"
+        lead_text = f" avec l'ID {lead_id}" if lead_id else ""
+        body = (
+            f"Cette saisie a déjà été confirmée dans Odoo{lead_text}. "
+            "Vous pouvez la reprendre comme base d'une nouvelle saisie, mais vérifiez avant de recréer."
+        )
+        button_label = "Reprendre cette saisie"
+        icon = "✅"
+    else:
+        title = "Brouillon non envoyé retrouvé"
+        body = (
+            "Une saisie précédente a été retrouvée sur cet appareil. "
+            "Elle n'a peut-être pas été confirmée dans Odoo."
+        )
+        button_label = "Restaurer le brouillon"
+        icon = "📝"
+
+    with st.expander(f"{icon} {title}", expanded=(status != "sent")):
+        if status == "sent":
+            st.info(body)
+        else:
+            st.warning(body)
+
+        st.caption(f"Saisie sauvegardée : {partner_name} - {city}" + (f" | {saved_at}" if saved_at else ""))
+        st.caption("Ce brouillon est sauvegardé uniquement dans le navigateur de cet appareil.")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button(button_label, key="restore_local_browser_draft"):
+                on_restore(payload)
+        with col2:
+            if st.button("Supprimer ce brouillon", key="delete_local_browser_draft"):
+                on_delete()
+
+
 def render_draft_recovery(on_restore, on_ignore):
     draft = st.session_state.get("last_unsent_draft")
     if not draft:
@@ -141,13 +193,36 @@ def render_draft_recovery(on_restore, on_ignore):
 
 
 def render_debug_events():
+    show_debug = False
+    try:
+        show_debug = bool(st.secrets.get("SHOW_DEBUG", False))
+    except Exception:
+        show_debug = False
+
+    if not show_debug:
+        return
+
     events = st.session_state.get("debug_events") or []
-    if not events:
+    local_error = st.session_state.get("local_draft_error")
+    if not events and not local_error:
         return
 
     with st.expander("Diagnostic technique", expanded=False):
         st.caption("Journal local de la session, utile pendant les tests terrain.")
+        if local_error:
+            st.warning(f"Stockage navigateur : {local_error}")
         st.write(events)
+
+
+
+def _format_saved_at(value: Any) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except Exception:
+        return str(value)
+    return f"sauvegardée le {_format_date_fr(parsed.date())} à {parsed.strftime('%H:%M')}"
 
 
 def _format_deadline(value: Any) -> str:

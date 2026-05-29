@@ -63,6 +63,9 @@ def init_state():
         "last_created_lead_id": None,
         "draft_restored": False,
         "debug_events": [],
+        "available_local_draft": None,
+        "local_draft_available": False,
+        "local_draft_error": None,
     }
 
     for key, value in defaults.items():

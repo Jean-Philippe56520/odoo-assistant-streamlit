@@ -8,6 +8,7 @@ from odoo_import.lead_service import (
 )
 from odoo_import.odoo_client import create_activity_for_lead
 from odoo_streamlit.debug import add_debug_event
+from odoo_streamlit.local_draft import mark_local_draft_sent, save_local_draft
 from odoo_streamlit.services import get_odoo
 from odoo_streamlit.state import request_full_reset
 
@@ -93,7 +94,7 @@ def process_duplicate_action(action, preview_data, existing_data, existing_id, t
                 )
 
             add_debug_event("lead_update_success", {"lead_id": result.lead_id})
-            _clear_draft_after_success(result.lead_id)
+            _clear_draft_after_success(result.lead_id, preview_data)
             request_full_reset(clear_banner=False)
             st.rerun()
 
@@ -155,7 +156,7 @@ def process_duplicate_action(action, preview_data, existing_data, existing_id, t
                 )
 
             add_debug_event("lead_create_despite_duplicate_success", {"lead_id": result.lead_id})
-            _clear_draft_after_success(result.lead_id)
+            _clear_draft_after_success(result.lead_id, preview_data)
             request_full_reset(clear_banner=False)
             st.rerun()
 
@@ -227,7 +228,7 @@ def process_create_action(preview_data, team_id):
             )
 
         add_debug_event("lead_create_success", {"lead_id": result.lead_id})
-        _clear_draft_after_success(result.lead_id)
+        _clear_draft_after_success(result.lead_id, preview_data)
         request_full_reset(clear_banner=False)
         st.rerun()
 
@@ -244,15 +245,19 @@ def process_create_action(preview_data, team_id):
 
 
 def _preserve_draft(preview_data, vals):
-    st.session_state["last_unsent_draft"] = dict(preview_data or {})
+    draft = dict(preview_data or {})
+    st.session_state["last_unsent_draft"] = draft
     st.session_state["last_unsent_vals"] = dict(vals or {})
+    save_local_draft(draft, status="unsent")
 
 
-def _clear_draft_after_success(lead_id):
+def _clear_draft_after_success(lead_id, preview_data=None):
     st.session_state["last_created_lead_id"] = lead_id
     st.session_state["last_unsent_draft"] = None
     st.session_state["last_unsent_vals"] = None
     st.session_state["draft_restored"] = False
+    if preview_data:
+        mark_local_draft_sent(dict(preview_data or {}), lead_id=lead_id)
 
 
 def _try_create_activity(lead_id, vals):

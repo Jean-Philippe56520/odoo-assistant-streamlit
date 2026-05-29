@@ -23,6 +23,9 @@ APP_STATE_KEYS = (
     "last_created_lead_id",
     "draft_restored",
     "debug_events",
+    "available_local_draft",
+    "local_draft_available",
+    "local_draft_error",
 )
 
 # Champs du formulaire principal
@@ -87,3 +90,9 @@ ERROR_ACTIVITY_SUMMARY_REQUIRED = "Le résumé de l'activité est obligatoire."
 ERROR_ACTIVITY_DATE_REQUIRED = "La date de relance est obligatoire."
 ERROR_ACTIVITY_DATE_PAST = "La date de relance ne peut pas être dans le passé."
 ERROR_ACTIVITY_CUSTOM_DATE_INVALID = "La date personnalisée de relance est invalide."
+
+
+# Brouillon navigateur localStorage
+LOCAL_DRAFT_KEY = "abm_odoo_assistant_last_draft_v1"
+LOCAL_DRAFT_STORAGE_COMPONENT_KEY = "abm_odoo_assistant_local_storage"
+LOCAL_DRAFT_TTL_DAYS = 7

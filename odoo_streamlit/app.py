@@ -12,6 +12,12 @@ if str(PROJECT_DIR) not in sys.path:
 from odoo_streamlit.actions import process_create_action, process_duplicate_action
 from odoo_streamlit.constants import FORM_FIELD_KEYS
 from odoo_streamlit.debug import add_debug_event
+from odoo_streamlit.local_draft import (
+    clear_local_draft,
+    init_local_draft_storage,
+    refresh_local_draft_state,
+    save_local_draft,
+)
 from odoo_streamlit.auth import render_logout, require_simple_auth
 from odoo_streamlit.constants import APP_STATE_KEYS
 from odoo_streamlit.forms import render_lead_form, validate_form
@@ -19,16 +25,13 @@ from odoo_streamlit.services import compute_preview, get_odoo, get_sales_users, 
 from odoo_streamlit.state import apply_pending_resets, init_state, request_preview_reset
 from odoo_streamlit.views import (
     render_banner,
+    render_debug_events,
     render_draft_recovery,
+    render_local_draft_recovery,
     render_page_header,
     show_existing,
     show_preview,
 )
-try:
-    from odoo_streamlit.views import render_debug_events
-except ImportError:
-    def render_debug_events():
-        return None
 
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
 
@@ -73,15 +76,56 @@ def ignore_last_unsent_draft():
     st.rerun()
 
 
+def restore_local_draft(payload):
+    data = dict((payload or {}).get("data") or {})
+    if not data:
+        return
+
+    st.session_state["form_data"] = data
+    st.session_state["last_unsent_draft"] = data
+
+    for key in FORM_FIELD_KEYS:
+        if key in data:
+            st.session_state[key] = data[key]
+
+    status = (payload or {}).get("status")
+    lead_id = (payload or {}).get("lead_id")
+    if status == "sent" and lead_id:
+        message = (
+            f"Dernière saisie envoyée restaurée. Attention : cette piste a déjà été "
+            f"confirmée dans Odoo avec l'ID {lead_id}. Vérifiez avant de recréer."
+        )
+    else:
+        message = "Brouillon local restauré. Vérifiez les informations avant de prévisualiser à nouveau."
+
+    st.session_state["draft_restored"] = True
+    st.session_state["result_banner"] = {"status": "warning", "message": message}
+    add_debug_event(
+        "local_draft_restored",
+        {"status": status, "lead_id": lead_id, "partner_name": data.get("partner_name"), "city": data.get("city")},
+    )
+    request_preview_reset()
+    st.rerun()
+
+
+def delete_local_draft():
+    clear_local_draft()
+    add_debug_event("local_draft_deleted")
+    st.rerun()
+
+
 require_simple_auth()
 render_logout(APP_STATE_KEYS)
 
 init_state()
+local_draft_storage = init_local_draft_storage()
+refresh_local_draft_state(local_draft_storage)
 apply_pending_resets()
 
 render_page_header()
 render_banner()
 render_form_messages()
+render_local_draft_recovery(restore_local_draft, delete_local_draft)
 render_draft_recovery(restore_last_unsent_draft, ignore_last_unsent_draft)
 
 try:
@@ -105,6 +149,7 @@ if submitted:
     st.session_state["result_banner"] = None
     st.session_state["form_data"] = raw_data
     st.session_state["last_unsent_draft"] = dict(raw_data)
+    save_local_draft(raw_data, status="unsent", storage=local_draft_storage)
     st.session_state["form_errors"] = []
     st.session_state["form_warnings"] = []
     add_debug_event("preview_submitted", {"partner_name": raw_data.get("partner_name"), "city": raw_data.get("city")})
