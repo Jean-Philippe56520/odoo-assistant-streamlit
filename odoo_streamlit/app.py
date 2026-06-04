@@ -363,6 +363,23 @@ def display_banner():
         st.error(banner["message"], icon="❌")
 
 
+def render_resume_reload_notice(snapshot):
+    if not snapshot.get("reload_requested"):
+        return
+
+    draft_exists = snapshot.get("draft_exists", False)
+    if draft_exists:
+        st.info(
+            "Application rechargée après retour au premier plan. "
+            "Un brouillon non envoyé a été retrouvé sur cet appareil."
+        )
+    else:
+        st.info(
+            "Application rechargée après retour au premier plan. "
+            "Vous pouvez commencer une nouvelle saisie."
+        )
+
+
 require_simple_auth()
 render_logout(APP_STATE_KEYS)
 
@@ -392,6 +409,7 @@ seller_names = list(seller_options.keys())
 
 snapshot = get_browser_snapshot(st.session_state["streamlit_session_id"])
 status = snapshot.get("status")
+render_resume_reload_notice(snapshot)
 
 if status == "session_reset" and not st.session_state.get("session_reset_acknowledged"):
     render_session_reset_block(snapshot, seller_names=seller_names)
