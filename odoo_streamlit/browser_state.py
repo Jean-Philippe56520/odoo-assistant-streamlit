@@ -50,9 +50,41 @@ def _storage_js(storage_area: str) -> str:
     return "sessionStorage" if storage_area == "session" else "localStorage"
 
 
+def _storage_candidates_js(storage_area: str) -> str:
+    storage_name = _storage_js(storage_area)
+    return f"""
+function __abmStorageCandidates() {{
+  const stores = [];
+  try {{
+    if (window.parent && window.parent.{storage_name}) {{
+      stores.push(window.parent.{storage_name});
+    }}
+  }} catch (error) {{}}
+  try {{
+    if (window.{storage_name}) {{
+      stores.push(window.{storage_name});
+    }}
+  }} catch (error) {{}}
+  return stores.filter(function (store, index, arr) {{ return store && arr.indexOf(store) === index; }});
+}}
+"""
+
+
 def _read_raw_storage(key_name: str, component_key: str, storage_area: str = "local"):
-    storage = _storage_js(storage_area)
-    expression = f"{storage}.getItem({_json(key_name)})"
+    expression = f"""
+(function () {{
+  const key = {_json(key_name)};
+  {_storage_candidates_js(storage_area)}
+  const stores = __abmStorageCandidates();
+  for (const store of stores) {{
+    try {{
+      const value = store.getItem(key);
+      if (value !== null && typeof value !== "undefined") {{ return value; }}
+    }} catch (error) {{}}
+  }}
+  return null;
+}})()
+"""
     return streamlit_js_eval(
         js_expressions=expression,
         key=component_key,
@@ -71,8 +103,16 @@ def read_json_storage(key_name: str, component_key: str, default=None, storage_a
 
 
 def write_json_storage(key_name: str, value: dict, component_key: str, storage_area: str = "local"):
-    storage = _storage_js(storage_area)
-    expression = f"{storage}.setItem({_json(key_name)}, {_json(_json(value))})"
+    expression = f"""
+(function () {{
+  const key = {_json(key_name)};
+  const value = {_json(_json(value))};
+  {_storage_candidates_js(storage_area)}
+  __abmStorageCandidates().forEach(function (store) {{
+    try {{ store.setItem(key, value); }} catch (error) {{}}
+  }});
+}})()
+"""
     streamlit_js_eval(
         js_expressions=expression,
         key=component_key,
@@ -81,8 +121,15 @@ def write_json_storage(key_name: str, value: dict, component_key: str, storage_a
 
 
 def remove_storage(key_name: str, component_key: str, storage_area: str = "local"):
-    storage = _storage_js(storage_area)
-    expression = f"{storage}.removeItem({_json(key_name)})"
+    expression = f"""
+(function () {{
+  const key = {_json(key_name)};
+  {_storage_candidates_js(storage_area)}
+  __abmStorageCandidates().forEach(function (store) {{
+    try {{ store.removeItem(key); }} catch (error) {{}}
+  }});
+}})()
+"""
     streamlit_js_eval(
         js_expressions=expression,
         key=component_key,
@@ -195,11 +242,34 @@ def get_browser_snapshot(current_session_id: str) -> dict:
 
 
 def has_meaningful_draft(data: dict | None) -> bool:
+    """Return True only when the draft contains real prospect content.
+
+    The commercial/seller is a persistent user preference, not a prospect draft.
+    Default activity values are also ignored unless the activity checkbox is
+    enabled. This prevents an empty form from creating or keeping a false draft.
+    """
     if not data:
         return False
-    for key in FORM_FIELD_KEYS + ("seller_name",):
-        if str(data.get(key) or "").strip():
-            return True
+
+    prospect_keys = (
+        "partner_name",
+        "contact_name",
+        "phone",
+        "mobile",
+        "email_from",
+        "street",
+        "street2",
+        "zip",
+        "city",
+        "current_equipment",
+        "free_comment",
+    )
+    if any(str(data.get(key) or "").strip() for key in prospect_keys):
+        return True
+
+    if bool(data.get("create_activity")):
+        return True
+
     return False
 
 
@@ -243,27 +313,21 @@ def save_last_seller_name(seller_name: str | None, component_key: str = "save_la
     if not seller:
         return
 
-    # Use a tiny HTML component instead of a read/write Streamlit component.
-    # We do not need a returned value; we only need the browser to commit the
-    # localStorage write reliably during this render.
-    html = f"""
-    <script>
-    (function () {{
-      const key = {_json(LAST_SELLER_KEY)};
-      const value = {_json(seller)};
-      try {{
-        if (window.parent && window.parent.localStorage) {{
-          window.parent.localStorage.setItem(key, value);
-        }} else {{
-          localStorage.setItem(key, value);
-        }}
-      }} catch (error) {{
-        try {{ localStorage.setItem(key, value); }} catch (_) {{}}
-      }}
-    }})();
-    </script>
-    """
-    components.html(html, height=0, width=0)
+    expression = f"""
+(function () {{
+  const key = {_json(LAST_SELLER_KEY)};
+  const value = {_json(seller)};
+  {_storage_candidates_js("local")}
+  __abmStorageCandidates().forEach(function (store) {{
+    try {{ store.setItem(key, value); }} catch (error) {{}}
+  }});
+}})()
+"""
+    streamlit_js_eval(
+        js_expressions=expression,
+        key=component_key,
+        want_output=False,
+    )
 
 
 def clear_last_seller_name(component_key: str = "clear_last_seller_name"):
@@ -274,10 +338,20 @@ def clear_local_draft(component_key: str = "clear_local_draft"):
     # Also write a short suppression marker so the browser-side DOM watcher does
     # not immediately recreate the just-deleted draft from an old DOM during a
     # Streamlit rerun after successful Odoo creation/update.
-    expression = (
-        f"localStorage.removeItem({_json(DRAFT_KEY)});"
-        "localStorage.setItem('abm_odoo_draft_suppressed_until_v1', String(Date.now() + 5000));"
-    )
+    expression = f"""
+(function () {{
+  const draftKey = {_json(DRAFT_KEY)};
+  const suppressionKey = "abm_odoo_draft_suppressed_until_v1";
+  const suppressionValue = String(Date.now() + 5000);
+  {_storage_candidates_js("local")}
+  __abmStorageCandidates().forEach(function (store) {{
+    try {{
+      store.removeItem(draftKey);
+      store.setItem(suppressionKey, suppressionValue);
+    }} catch (error) {{}}
+  }});
+}})()
+"""
     streamlit_js_eval(
         js_expressions=expression,
         key=component_key,
@@ -361,37 +435,47 @@ def render_connection_watchdog():
     return getRootWindow().document || document;
   }
 
-  function localStore() {
-    return getRootWindow().localStorage || window.localStorage;
+  function storageCandidates(kind) {
+    const prop = kind === "session" ? "sessionStorage" : "localStorage";
+    const stores = [];
+    try {
+      if (window.parent && window.parent[prop]) { stores.push(window.parent[prop]); }
+    } catch (error) {}
+    try {
+      if (window[prop]) { stores.push(window[prop]); }
+    } catch (error) {}
+    return stores.filter(function (store, index, arr) { return store && arr.indexOf(store) === index; });
   }
 
-  function sessionStore() {
-    return getRootWindow().sessionStorage || window.sessionStorage;
+  function storageGet(kind, key) {
+    const stores = storageCandidates(kind);
+    for (const store of stores) {
+      try {
+        const value = store.getItem(key);
+        if (value !== null && typeof value !== "undefined") { return value; }
+      } catch (error) {}
+    }
+    return null;
   }
 
-  function localGet(key) {
-    try { return localStore().getItem(key); } catch (error) { return null; }
+  function storageSet(kind, key, value) {
+    storageCandidates(kind).forEach(function (store) {
+      try { store.setItem(key, value); } catch (error) {}
+    });
   }
 
-  function localSet(key, value) {
-    try { localStore().setItem(key, value); } catch (error) {}
+  function storageRemove(kind, key) {
+    storageCandidates(kind).forEach(function (store) {
+      try { store.removeItem(key); } catch (error) {}
+    });
   }
 
-  function localRemove(key) {
-    try { localStore().removeItem(key); } catch (error) {}
-  }
-
-  function sessionGet(key) {
-    try { return sessionStore().getItem(key); } catch (error) { return null; }
-  }
-
-  function sessionSet(key, value) {
-    try { sessionStore().setItem(key, value); } catch (error) {}
-  }
-
-  function sessionRemove(key) {
-    try { sessionStore().removeItem(key); } catch (error) {}
-  }
+  function localGet(key) { return storageGet("local", key); }
+  function localSet(key, value) { storageSet("local", key, value); }
+  function localRemove(key) { storageRemove("local", key); }
+  function sessionGet(key) { return storageGet("session", key); }
+  function sessionSet(key, value) { storageSet("session", key, value); }
+  function sessionRemove(key) { storageRemove("session", key); }
 
   function draftSaveSuppressed() {
     const until = Number(localGet(DRAFT_SUPPRESSED_UNTIL_KEY) || "0");
@@ -508,8 +592,15 @@ def render_connection_watchdog():
   }
 
   function hasMeaningfulDraft(data) {
-    const keys = ["partner_name", "contact_name", "phone", "mobile", "email_from", "street", "street2", "zip", "city", "current_equipment", "free_comment", "seller_name", "activity_summary"];
-    return keys.some(function (key) { return String((data && data[key]) || "").trim().length > 0; });
+    if (!data) { return false; }
+    const prospectKeys = [
+      "partner_name", "contact_name", "phone", "mobile", "email_from",
+      "street", "street2", "zip", "city", "current_equipment", "free_comment"
+    ];
+    if (prospectKeys.some(function (key) { return String(data[key] || "").trim().length > 0; })) {
+      return true;
+    }
+    return Boolean(data.create_activity);
   }
 
   function readExistingDraft() {
@@ -588,7 +679,7 @@ def render_connection_watchdog():
 
   function collectDraftFromDom() {
     const doc = getRootDocument();
-    const draft = Object.assign({}, readExistingDraft());
+    const draft = {};
     formFieldDescriptors().forEach(function (pair) {
       const key = pair[0];
       const selector = pair[1];
