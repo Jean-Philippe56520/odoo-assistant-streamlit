@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import streamlit as st
@@ -30,6 +30,11 @@ FORM_FIELD_KEYS = (
     "city",
     "current_equipment",
     "free_comment",
+    "create_activity",
+    "activity_type",
+    "activity_summary",
+    "activity_date_mode",
+    "activity_custom_date",
 )
 
 
@@ -199,7 +204,15 @@ def has_meaningful_draft(data: dict | None) -> bool:
 
 
 def build_draft_from_session(seller_name: str | None = None) -> dict:
-    data = {key: str(st.session_state.get(key, "") or "") for key in FORM_FIELD_KEYS}
+    data = {}
+    for key in FORM_FIELD_KEYS:
+        value = st.session_state.get(key)
+        if key == "create_activity":
+            data[key] = bool(value)
+        elif key == "activity_custom_date" and isinstance(value, date):
+            data[key] = value.isoformat()
+        else:
+            data[key] = str(value or "")
     if seller_name:
         data["seller_name"] = seller_name
     elif st.session_state.get("seller_name"):
@@ -272,10 +285,26 @@ def clear_local_draft(component_key: str = "clear_local_draft"):
     )
 
 
+def _coerce_draft_date(value):
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return date.fromisoformat(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
 def restore_draft_to_session_state(draft: dict, seller_names: list[str] | None = None):
     form_data = {}
     for key in FORM_FIELD_KEYS:
-        value = str(draft.get(key, "") or "")
+        if key == "create_activity":
+            value = bool(draft.get(key, False))
+        elif key == "activity_custom_date":
+            value = _coerce_draft_date(draft.get(key))
+        else:
+            value = str(draft.get(key, "") or "")
         st.session_state[key] = value
         form_data[key] = value
 
@@ -472,12 +501,14 @@ def render_connection_watchdog():
       ["zip", "input[aria-label=\"Code postal\"]"],
       ["city", "input[aria-label=\"Ville\"]"],
       ["current_equipment", "textarea[aria-label=\"Équipement actuel\"]"],
-      ["free_comment", "textarea[aria-label=\"Commentaire libre\"]"]
+      ["free_comment", "textarea[aria-label=\"Commentaire libre\"]"],
+      ["activity_summary", "input[aria-label=\"Résumé\"]"],
+      ["activity_custom_date", "input[aria-label=\"Choisir une date\"]"]
     ];
   }
 
   function hasMeaningfulDraft(data) {
-    const keys = ["partner_name", "contact_name", "phone", "mobile", "email_from", "street", "street2", "zip", "city", "current_equipment", "free_comment", "seller_name"];
+    const keys = ["partner_name", "contact_name", "phone", "mobile", "email_from", "street", "street2", "zip", "city", "current_equipment", "free_comment", "seller_name", "activity_summary"];
     return keys.some(function (key) { return String((data && data[key]) || "").trim().length > 0; });
   }
 
@@ -485,6 +516,52 @@ def render_connection_watchdog():
     const raw = localGet(DRAFT_KEY);
     if (!raw) { return {}; }
     try { return JSON.parse(raw) || {}; } catch (error) { return {}; }
+  }
+
+  function findCheckboxByLabel(labelText) {
+    const doc = getRootDocument();
+    const labels = Array.from(doc.querySelectorAll('label'));
+    const target = String(labelText || '').trim().toLowerCase();
+    for (const label of labels) {
+      const text = String(label.textContent || '').trim().toLowerCase();
+      if (!text.includes(target)) { continue; }
+      const input = label.querySelector('input[type="checkbox"]') || (label.getAttribute('for') ? doc.getElementById(label.getAttribute('for')) : null);
+      if (input && input.type === 'checkbox') { return input; }
+      const container = label.closest('[data-testid="stCheckbox"], div');
+      if (container) {
+        const nested = container.querySelector('input[type="checkbox"]');
+        if (nested) { return nested; }
+      }
+    }
+    return null;
+  }
+
+  function findSelectedValueByLabel(labelText) {
+    const doc = getRootDocument();
+    const labels = Array.from(doc.querySelectorAll('label, [aria-label]'));
+    const target = String(labelText || '').trim().toLowerCase();
+    for (const label of labels) {
+      const text = String(label.textContent || label.getAttribute('aria-label') || '').trim().toLowerCase();
+      if (text !== target) { continue; }
+      const container = label.closest('[data-testid="stSelectbox"], div');
+      if (!container) { continue; }
+      const selected = container.querySelector('[data-baseweb="select"] [title], [data-baseweb="select"] div[role="button"], [data-baseweb="select"]');
+      const value = String((selected && (selected.getAttribute('title') || selected.textContent)) || '').trim();
+      if (value && value.toLowerCase() !== target) { return value; }
+    }
+    return '';
+  }
+
+  function findSelectedRadioValueByGroupLabel(labelText) {
+    const doc = getRootDocument();
+    const radios = Array.from(doc.querySelectorAll('input[type="radio"]'));
+    for (const radio of radios) {
+      if (!radio.checked) { continue; }
+      const label = radio.closest('label');
+      const value = String((label && label.textContent) || radio.value || '').trim();
+      if (value) { return value; }
+    }
+    return '';
   }
 
   function findSellerValueFromDom() {
@@ -524,6 +601,14 @@ def render_connection_watchdog():
     if (seller) {
       draft.seller_name = seller;
     }
+    const activityCheckbox = findCheckboxByLabel("Prévoir une activité de relance");
+    if (activityCheckbox) {
+      draft.create_activity = Boolean(activityCheckbox.checked);
+    }
+    const activityType = findSelectedValueByLabel("Type d'activité");
+    if (activityType) { draft.activity_type = activityType; }
+    const activityDateMode = findSelectedRadioValueByGroupLabel("Date de relance");
+    if (activityDateMode) { draft.activity_date_mode = activityDateMode; }
     draft.saved_at = new Date().toISOString();
     draft.source = "browser_dom";
     return draft;

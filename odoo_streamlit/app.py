@@ -36,6 +36,23 @@ from odoo_streamlit.browser_state import (
     save_last_seller_name,
     save_local_draft,
 )
+from odoo_streamlit.constants import (
+    ACTIVITY_CUSTOM_DATE_LABEL,
+    ACTIVITY_DATE_LABEL,
+    ACTIVITY_DATE_MODES,
+    ACTIVITY_PREVIEW_LABEL,
+    ACTIVITY_SECTION_TITLE,
+    ACTIVITY_SUMMARY_LABEL,
+    ACTIVITY_SUMMARY_PLACEHOLDER,
+    ACTIVITY_TOGGLE_HELP,
+    ACTIVITY_TOGGLE_LABEL,
+    ACTIVITY_TYPE_LABEL,
+    ACTIVITY_TYPE_LABELS,
+    DEFAULT_ACTIVITY_DATE_MODE,
+    DEFAULT_ACTIVITY_SUMMARY,
+    DEFAULT_ACTIVITY_TYPE,
+)
+from datetime import date, timedelta
 
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
 
@@ -91,6 +108,11 @@ def _empty_form_data():
         "city": "",
         "current_equipment": "",
         "free_comment": "",
+        "create_activity": False,
+        "activity_type": DEFAULT_ACTIVITY_TYPE,
+        "activity_summary": DEFAULT_ACTIVITY_SUMMARY,
+        "activity_date_mode": DEFAULT_ACTIVITY_DATE_MODE,
+        "activity_custom_date": date.today() + timedelta(days=7),
     }
 
 
@@ -123,8 +145,9 @@ def _init_state():
 
 
 def _clear_form_widget_state():
+    defaults = _empty_form_data()
     for key in FORM_FIELD_KEYS:
-        st.session_state[key] = ""
+        st.session_state[key] = defaults.get(key, "")
 
     st.session_state["confirm_existing"] = False
     st.session_state["duplicate_action_radio"] = "Mettre à jour le lead existant"
@@ -263,6 +286,12 @@ def show_preview(preview_vals, raw_data, seller_name):
     st.write(f"**Ville :** {raw_data.get('city') or '-'}")
     st.write(f"**Équipement actuel :** {raw_data.get('current_equipment') or '-'}")
     st.write(f"**Commentaire libre :** {raw_data.get('free_comment') or '-'}")
+    if raw_data.get("create_activity"):
+        st.write(f"**Activité de relance :** {raw_data.get('activity_type') or DEFAULT_ACTIVITY_TYPE}")
+        st.write(f"**Résumé activité :** {raw_data.get('activity_summary') or DEFAULT_ACTIVITY_SUMMARY}")
+        st.write(f"**Date de relance :** {raw_data.get('activity_deadline') or raw_data.get('activity_custom_date') or '-'}")
+    else:
+        st.write("**Activité de relance :** non prévue")
     if preview_vals.get("description"):
         with st.expander("Notes générées pour Odoo", expanded=False):
             st.text(preview_vals["description"])
@@ -280,7 +309,16 @@ def update_lead(lead_id, vals):
 
 
 def get_raw_form_data_from_session():
-    return {key: str(st.session_state.get(key, "") or "") for key in FORM_FIELD_KEYS}
+    data = {}
+    for key in FORM_FIELD_KEYS:
+        value = st.session_state.get(key)
+        if key == "create_activity":
+            data[key] = bool(value)
+        elif key == "activity_custom_date":
+            data[key] = value
+        else:
+            data[key] = str(value or "")
+    return data
 
 
 def sync_form_data_from_widgets():
@@ -303,11 +341,114 @@ def handle_seller_change():
     request_preview_reset()
 
 
+
+def _coerce_date(value, default=None):
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return date.fromisoformat(value.strip())
+        except ValueError:
+            return default or date.today()
+    return default or date.today()
+
+
+def _compute_deadline_from_mode(mode: str):
+    if mode == "J+30":
+        return date.today() + timedelta(days=30)
+    return date.today() + timedelta(days=7)
+
+
+def _format_date_fr(value):
+    value = _coerce_date(value)
+    return value.strftime("%d/%m/%Y")
+
+
+def _get_activity_type_index(value):
+    try:
+        return list(ACTIVITY_TYPE_LABELS).index(value)
+    except ValueError:
+        return list(ACTIVITY_TYPE_LABELS).index(DEFAULT_ACTIVITY_TYPE)
+
+
+def _get_activity_date_mode_index(value):
+    try:
+        return list(ACTIVITY_DATE_MODES).index(value)
+    except ValueError:
+        return list(ACTIVITY_DATE_MODES).index(DEFAULT_ACTIVITY_DATE_MODE)
+
+
+def render_activity_section():
+    st.subheader(ACTIVITY_SECTION_TITLE)
+
+    create_activity = st.checkbox(
+        ACTIVITY_TOGGLE_LABEL,
+        value=bool(st.session_state.get("create_activity", False)),
+        help=ACTIVITY_TOGGLE_HELP,
+        key="create_activity",
+        on_change=handle_form_change,
+    )
+
+    if not create_activity:
+        st.caption("Aucune activité planifiée pour cette piste.")
+        st.session_state["activity_type"] = st.session_state.get("activity_type") or DEFAULT_ACTIVITY_TYPE
+        st.session_state["activity_summary"] = st.session_state.get("activity_summary") or DEFAULT_ACTIVITY_SUMMARY
+        st.session_state["activity_date_mode"] = st.session_state.get("activity_date_mode") or DEFAULT_ACTIVITY_DATE_MODE
+        if not st.session_state.get("activity_custom_date"):
+            st.session_state["activity_custom_date"] = _compute_deadline_from_mode(DEFAULT_ACTIVITY_DATE_MODE)
+        return
+
+    st.selectbox(
+        ACTIVITY_TYPE_LABEL,
+        ACTIVITY_TYPE_LABELS,
+        index=_get_activity_type_index(st.session_state.get("activity_type") or DEFAULT_ACTIVITY_TYPE),
+        key="activity_type",
+        on_change=handle_form_change,
+    )
+
+    st.text_input(
+        ACTIVITY_SUMMARY_LABEL,
+        value=st.session_state.get("activity_summary") or DEFAULT_ACTIVITY_SUMMARY,
+        placeholder=ACTIVITY_SUMMARY_PLACEHOLDER,
+        key="activity_summary",
+        on_change=handle_form_change,
+    )
+
+    activity_date_mode = st.radio(
+        ACTIVITY_DATE_LABEL,
+        ACTIVITY_DATE_MODES,
+        index=_get_activity_date_mode_index(st.session_state.get("activity_date_mode") or DEFAULT_ACTIVITY_DATE_MODE),
+        horizontal=True,
+        key="activity_date_mode",
+        on_change=handle_form_change,
+    )
+
+    if activity_date_mode == "Choisir une date":
+        custom_date = st.date_input(
+            ACTIVITY_CUSTOM_DATE_LABEL,
+            value=_coerce_date(
+                st.session_state.get("activity_custom_date"),
+                default=_compute_deadline_from_mode(DEFAULT_ACTIVITY_DATE_MODE),
+            ),
+            min_value=date.today(),
+            format="DD/MM/YYYY",
+            key="activity_custom_date",
+            on_change=handle_form_change,
+        )
+        computed_date = custom_date
+    else:
+        computed_date = _compute_deadline_from_mode(activity_date_mode)
+        st.session_state["activity_custom_date"] = computed_date
+
+    st.caption(f"{ACTIVITY_PREVIEW_LABEL} : {_format_date_fr(computed_date)}")
+
+
 def ensure_form_widgets_initialized():
     form_data = st.session_state.get("form_data") or _empty_form_data()
+    defaults = _empty_form_data()
     for key in FORM_FIELD_KEYS:
         if key not in st.session_state:
-            st.session_state[key] = form_data.get(key, "")
+            st.session_state[key] = form_data.get(key, defaults.get(key, ""))
 
 
 def has_confirmed_odoo_success_banner():
@@ -554,6 +695,8 @@ st.text_input("Ville", key="city", on_change=handle_form_change)
 st.subheader("Notes")
 st.text_area("Équipement actuel", key="current_equipment", on_change=handle_form_change)
 st.text_area("Commentaire libre", key="free_comment", on_change=handle_form_change)
+
+render_activity_section()
 
 sync_form_data_from_widgets()
 current_draft = build_draft_from_session(seller_name=seller_name)
