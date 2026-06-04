@@ -99,9 +99,11 @@ def bootstrap_auth(config: AuthConfig):
         return
 
     time.sleep(0.5)
-    restore_auth_from_cookie(config)
+    restored = restore_auth_from_cookie(config)
     st.session_state["cookie_bootstrap_done"] = True
-    st.rerun()
+
+    if not restored and not st.session_state.get("authenticated"):
+        st.rerun()
 
 
 def render_login_form(config: AuthConfig):
