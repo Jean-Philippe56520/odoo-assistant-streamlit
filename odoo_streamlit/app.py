@@ -366,17 +366,12 @@ def render_resume_reload_notice(snapshot):
     if not snapshot.get("reload_requested"):
         return
 
-    draft_exists = snapshot.get("draft_exists", False)
-    if draft_exists:
-        st.info(
-            "Application remise à jour après retour au premier plan. "
-            "Un brouillon non envoyé a été retrouvé sur cet appareil."
-        )
-    else:
-        st.info(
-            "Application remise à jour après retour au premier plan. "
-            "Vous pouvez commencer une nouvelle saisie."
-        )
+    # Si un brouillon existe, le bloc dédié render_draft_prompt() affiche déjà
+    # le message et les actions associées. On évite donc un doublon visuel.
+    if snapshot.get("draft_exists", False):
+        return
+
+    st.info("Application remise à jour après retour au premier plan. Vous pouvez commencer une nouvelle saisie.")
 
 
 require_simple_auth()
