@@ -220,15 +220,37 @@ def save_local_draft(data: dict, component_key: str = "save_local_draft"):
 
 
 def save_last_seller_name(seller_name: str | None, component_key: str = "save_last_seller_name"):
+    """Persist the seller used by the last successful Odoo write.
+
+    This is intentionally independent from the prospect draft. It is a user
+    preference and must survive reloads, browser restarts and form resets until
+    another successful Odoo write uses a different seller.
+    """
     seller = str(seller_name or "").strip()
     if not seller:
         return
-    expression = f"localStorage.setItem({_json(LAST_SELLER_KEY)}, {_json(seller)})"
-    streamlit_js_eval(
-        js_expressions=expression,
-        key=component_key,
-        want_output=False,
-    )
+
+    # Use a tiny HTML component instead of a read/write Streamlit component.
+    # We do not need a returned value; we only need the browser to commit the
+    # localStorage write reliably during this render.
+    html = f"""
+    <script>
+    (function () {{
+      const key = {_json(LAST_SELLER_KEY)};
+      const value = {_json(seller)};
+      try {{
+        if (window.parent && window.parent.localStorage) {{
+          window.parent.localStorage.setItem(key, value);
+        }} else {{
+          localStorage.setItem(key, value);
+        }}
+      }} catch (error) {{
+        try {{ localStorage.setItem(key, value); }} catch (_) {{}}
+      }}
+    }})();
+    </script>
+    """
+    components.html(html, height=0, width=0)
 
 
 def clear_last_seller_name(component_key: str = "clear_last_seller_name"):

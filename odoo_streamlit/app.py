@@ -112,6 +112,7 @@ def _init_state():
         "session_reset_acknowledged": False,
         "suppress_draft_prompt": False,
         "pending_last_successful_seller_name": None,
+        "seller_manually_changed": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -137,11 +138,11 @@ def _apply_pending_resets():
     if pending_seller:
         save_last_seller_name(pending_seller, component_key="save_last_successful_seller_name")
         st.session_state["seller_name"] = pending_seller
-        # Ne jamais écrire directement dans st.session_state["seller_selectbox"] ici.
-        # C'est une clé de widget Streamlit : si le selectbox a déjà été instancié
-        # dans le run courant, Streamlit lève une StreamlitAPIException.
-        # Le widget garde déjà la valeur sélectionnée lors de l'envoi réussi ;
-        # la persistance durable est assurée par save_last_seller_name().
+        # Ici on est au début d'un nouveau run, avant l'instanciation du selectbox.
+        # Il est donc autorisé de préparer la clé du widget. Ne jamais faire cela
+        # dans request_full_reset(), car le widget existe déjà dans ce run-là.
+        st.session_state["seller_selectbox"] = pending_seller
+        st.session_state["seller_manually_changed"] = False
         st.session_state["pending_last_successful_seller_name"] = None
 
     if st.session_state.get("pending_local_draft_clear"):
@@ -287,6 +288,17 @@ def sync_form_data_from_widgets():
 
 
 def handle_form_change():
+    sync_form_data_from_widgets()
+    request_preview_reset()
+
+
+def handle_seller_change():
+    # Le commercial est une préférence de saisie dans la session courante.
+    # Sa persistance durable n'est mise à jour qu'après une piste Odoo envoyée avec succès.
+    selected = str(st.session_state.get("seller_selectbox") or "").strip()
+    if selected:
+        st.session_state["seller_name"] = selected
+        st.session_state["seller_manually_changed"] = True
     sync_form_data_from_widgets()
     request_preview_reset()
 
@@ -487,20 +499,41 @@ ensure_form_widgets_initialized()
 render_draft_prompt(snapshot.get("draft") or {}, seller_names=seller_names)
 
 last_seller_name = str(snapshot.get("last_seller_name") or "").strip()
-current_seller = (
-    st.session_state.get("seller_selectbox")
-    or st.session_state.get("seller_name")
-    or last_seller_name
-)
+widget_seller = str(st.session_state.get("seller_selectbox") or "").strip()
+session_seller = str(st.session_state.get("seller_name") or "").strip()
+placeholder_seller = seller_names[0] if seller_names else ""
+
+# Priorité du commercial affiché :
+# 1. choix manuel courant dans cette session, s'il est réel ;
+# 2. commercial de la dernière piste Odoo envoyée avec succès, stocké en localStorage ;
+# 3. état métier courant ;
+# 4. valeur par défaut Odoo.
+# Important : ne jamais laisser le placeholder "A imputer" écraser une valeur persistée.
+if st.session_state.get("seller_manually_changed") and widget_seller in seller_options:
+    current_seller = widget_seller
+elif last_seller_name in seller_options:
+    current_seller = last_seller_name
+elif session_seller in seller_options:
+    current_seller = session_seller
+elif widget_seller in seller_options:
+    current_seller = widget_seller
+else:
+    current_seller = placeholder_seller
+
 if current_seller not in seller_options:
-    current_seller = seller_names[0]
+    current_seller = placeholder_seller
+
+# Préparer la clé du widget avant son instanciation. C'est autorisé par Streamlit
+# et nécessaire pour que la valeur persistée remplace le placeholder au chargement.
+if st.session_state.get("seller_selectbox") != current_seller:
+    st.session_state["seller_selectbox"] = current_seller
 
 seller_name = st.selectbox(
     "Commercial",
     seller_names,
     index=seller_names.index(current_seller),
     key="seller_selectbox",
-    on_change=handle_form_change,
+    on_change=handle_seller_change,
 )
 st.session_state["seller_name"] = seller_name
 st.session_state["seller_user_id"] = seller_options[seller_name]
