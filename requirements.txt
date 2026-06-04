@@ -5,3 +5,4 @@ pandas==3.0.2
 openpyxl==3.1.5
 rapidfuzz==3.14.5
 extra-streamlit-components==0.1.81
+streamlit-js-eval==0.1.7
