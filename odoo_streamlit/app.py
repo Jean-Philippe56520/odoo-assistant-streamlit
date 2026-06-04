@@ -366,12 +366,18 @@ def render_resume_reload_notice(snapshot):
     if not snapshot.get("reload_requested"):
         return
 
+    # Ne pas afficher cette notice lorsqu'un bandeau métier est déjà présent
+    # (ex. création/mise à jour Odoo confirmée). Dans ce cas, le message Odoo
+    # est prioritaire et l'application a simplement été remise à zéro après succès.
+    if st.session_state.get("result_banner"):
+        return
+
     # Si un brouillon existe, le bloc dédié render_draft_prompt() affiche déjà
     # le message et les actions associées. On évite donc un doublon visuel.
     if snapshot.get("draft_exists", False):
         return
 
-    st.info("Application remise à jour après retour au premier plan. Vous pouvez commencer une nouvelle saisie.")
+    st.info("Application prête. Vous pouvez commencer une nouvelle saisie.")
 
 
 require_simple_auth()
