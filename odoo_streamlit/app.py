@@ -19,6 +19,7 @@ from odoo_import.lead_service import (
     validate_lead_data,
 )
 from odoo_import.odoo_client import (
+    create_activity_for_lead,
     find_team_ventes,
     get_active_sales_users,
     odoo_connect,
@@ -306,6 +307,59 @@ def create_lead(vals):
 def update_lead(lead_id, vals):
     uid, models = get_odoo()
     return update_existing_lead(models, uid, lead_id, vals)
+
+
+def create_activity_after_lead(lead_id, vals):
+    activity_vals = (vals or {}).get("_activity_vals")
+    if not activity_vals:
+        return {"status": "none", "activity_id": None, "message": "Aucune activité à créer."}
+
+    try:
+        uid, _models = get_odoo()
+        activity_id = create_activity_for_lead(uid, lead_id, activity_vals)
+        return {
+            "status": "created",
+            "activity_id": activity_id,
+            "message": f"Activité créée dans Odoo (ID {activity_id}).",
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "activity_id": None,
+            "message": str(exc),
+        }
+
+
+def build_success_message(action_label, lead_id, activity_feedback=None):
+    base = f"Piste bien prise en compte par Odoo. {action_label} confirmée (ID {lead_id})."
+
+    if activity_feedback and activity_feedback.get("status") == "created":
+        return f"{base} Activité de relance créée dans Odoo (ID {activity_feedback.get('activity_id')}). Brouillon local supprimé."
+
+    return f"{base} Brouillon local supprimé."
+
+
+def build_activity_warning_message(action_label, lead_id, activity_feedback):
+    detail = (activity_feedback or {}).get("message") or "erreur inconnue"
+    return (
+        f"Piste bien prise en compte par Odoo. {action_label} confirmée (ID {lead_id}), "
+        f"mais l'activité de relance n'a pas pu être créée : {detail}"
+    )
+
+
+def apply_success_result_banner(action_label, lead_id, vals):
+    activity_feedback = create_activity_after_lead(lead_id, vals)
+
+    if activity_feedback.get("status") == "error":
+        st.session_state["result_banner"] = {
+            "status": "warning",
+            "message": build_activity_warning_message(action_label, lead_id, activity_feedback),
+        }
+    else:
+        st.session_state["result_banner"] = {
+            "status": "success",
+            "message": build_success_message(action_label, lead_id, activity_feedback),
+        }
 
 
 def get_raw_form_data_from_session():
@@ -766,10 +820,7 @@ if preview_data and preview_vals:
                     result = update_lead(existing_id, vals)
 
                     if result.success:
-                        st.session_state["result_banner"] = {
-                            "status": "success",
-                            "message": f"Piste bien prise en compte par Odoo. Mise à jour confirmée (ID {result.lead_id}). Brouillon local supprimé.",
-                        }
+                        apply_success_result_banner("Mise à jour", result.lead_id, vals)
                     else:
                         st.session_state["result_banner"] = {
                             "status": "warning",
@@ -800,10 +851,7 @@ if preview_data and preview_vals:
                     result = create_lead(vals)
 
                     if result.success:
-                        st.session_state["result_banner"] = {
-                            "status": "success",
-                            "message": f"Piste bien prise en compte par Odoo. Nouveau lead créé et confirmé (ID {result.lead_id}). Brouillon local supprimé.",
-                        }
+                        apply_success_result_banner("Création du nouveau lead", result.lead_id, vals)
                     else:
                         st.session_state["result_banner"] = {
                             "status": "warning",
@@ -851,10 +899,7 @@ if preview_data and preview_vals:
                 result = create_lead(vals)
 
                 if result.success:
-                    st.session_state["result_banner"] = {
-                        "status": "success",
-                        "message": f"Piste bien prise en compte par Odoo. Création confirmée (ID {result.lead_id}). Brouillon local supprimé.",
-                    }
+                    apply_success_result_banner("Création", result.lead_id, vals)
                 else:
                     st.session_state["result_banner"] = {
                         "status": "warning",
