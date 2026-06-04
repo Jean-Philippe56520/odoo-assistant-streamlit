@@ -54,6 +54,7 @@ APP_STATE_KEYS = (
     "draft_restored",
     "draft_prompt_dismissed",
     "session_reset_acknowledged",
+    "suppress_draft_prompt",
 )
 
 
@@ -107,6 +108,7 @@ def _init_state():
         "draft_restored": False,
         "draft_prompt_dismissed": False,
         "session_reset_acknowledged": False,
+        "suppress_draft_prompt": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -130,6 +132,8 @@ def _clear_form_widget_state():
 def _apply_pending_resets():
     if st.session_state.get("pending_local_draft_clear"):
         clear_local_draft(component_key="pending_clear_local_draft")
+        st.session_state["suppress_draft_prompt"] = True
+        st.session_state["draft_prompt_dismissed"] = True
         st.session_state["pending_local_draft_clear"] = False
 
     if st.session_state.get("pending_form_reset"):
@@ -167,6 +171,8 @@ def request_full_reset(clear_banner=False, clear_local_draft_after_rerun=False):
         st.session_state["result_banner"] = None
     if clear_local_draft_after_rerun:
         st.session_state["pending_local_draft_clear"] = True
+        st.session_state["suppress_draft_prompt"] = True
+        st.session_state["draft_prompt_dismissed"] = True
     st.session_state["pending_form_reset"] = True
 
 
@@ -304,6 +310,7 @@ def render_session_reset_block(snapshot, seller_names):
             if st.button("Reprendre le brouillon", type="primary", key="restore_draft_after_reset"):
                 restore_draft_to_session_state(draft, seller_names=seller_names)
                 st.session_state["session_reset_acknowledged"] = True
+                st.session_state["suppress_draft_prompt"] = True
                 st.session_state["result_banner"] = {
                     "status": "success",
                     "message": "Brouillon restauré. Vérifiez les informations avant de prévisualiser.",
@@ -312,6 +319,8 @@ def render_session_reset_block(snapshot, seller_names):
         with col2:
             if st.button("Effacer et recommencer", key="clear_draft_after_reset"):
                 st.session_state["session_reset_acknowledged"] = True
+                st.session_state["suppress_draft_prompt"] = True
+                st.session_state["draft_prompt_dismissed"] = True
                 st.session_state["pending_local_draft_clear"] = True
                 request_full_reset(clear_banner=True)
                 st.session_state["result_banner"] = {
@@ -322,6 +331,8 @@ def render_session_reset_block(snapshot, seller_names):
         with col3:
             if st.button("Continuer", key="continue_after_reset"):
                 st.session_state["session_reset_acknowledged"] = True
+                st.session_state["suppress_draft_prompt"] = True
+                st.session_state["draft_prompt_dismissed"] = True
                 st.session_state["result_banner"] = {
                     "status": "warning",
                     "message": "Application remise à jour. Le brouillon reste disponible si vous souhaitez le reprendre.",
@@ -331,6 +342,8 @@ def render_session_reset_block(snapshot, seller_names):
         st.write("Aucun brouillon local n'a été retrouvé. Vous pouvez commencer une nouvelle saisie.")
         if st.button("Continuer", type="primary", key="continue_after_reset_no_draft"):
             st.session_state["session_reset_acknowledged"] = True
+            st.session_state["suppress_draft_prompt"] = True
+            st.session_state["draft_prompt_dismissed"] = True
             st.session_state["result_banner"] = {
                 "status": "warning",
                 "message": "Application remise à jour. Vous pouvez recommencer une nouvelle saisie.",
@@ -348,6 +361,8 @@ def render_draft_prompt(draft, seller_names):
 
     if not has_meaningful_draft(draft):
         return
+    if st.session_state.get("suppress_draft_prompt"):
+        return
     if st.session_state.get("draft_prompt_dismissed"):
         return
     if has_meaningful_draft(get_raw_form_data_from_session()):
@@ -358,15 +373,19 @@ def render_draft_prompt(draft, seller_names):
     with col1:
         if st.button("Reprendre le brouillon", type="primary", key="restore_existing_draft"):
             restore_draft_to_session_state(draft, seller_names=seller_names)
+            st.session_state["suppress_draft_prompt"] = True
+            st.session_state["draft_prompt_dismissed"] = True
             st.rerun()
     with col2:
         if st.button("Effacer le brouillon", key="clear_existing_draft"):
             st.session_state["pending_local_draft_clear"] = True
+            st.session_state["suppress_draft_prompt"] = True
             st.session_state["draft_prompt_dismissed"] = True
             request_full_reset(clear_banner=True)
             st.rerun()
     with col3:
         if st.button("Ignorer", key="dismiss_existing_draft"):
+            st.session_state["suppress_draft_prompt"] = True
             st.session_state["draft_prompt_dismissed"] = True
             st.rerun()
 
@@ -477,7 +496,8 @@ st.text_area("Commentaire libre", key="free_comment", on_change=handle_form_chan
 
 sync_form_data_from_widgets()
 current_draft = build_draft_from_session(seller_name=seller_name)
-save_local_draft(current_draft, component_key="save_current_form_draft")
+if not has_confirmed_odoo_success_banner() and not st.session_state.get("pending_local_draft_clear"):
+    save_local_draft(current_draft, component_key="save_current_form_draft")
 
 submitted = st.button("Prévisualiser", type="primary", key="preview_button")
 

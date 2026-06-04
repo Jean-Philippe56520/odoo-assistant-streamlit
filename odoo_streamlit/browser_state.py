@@ -1,13 +1,20 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_js_eval import streamlit_js_eval
 
-APP_STATE_KEY = "abm_odoo_app_state_v1"
+# Durable browser data.
+# Keep the draft in localStorage so it survives page reloads and browser restarts.
 DRAFT_KEY = "abm_odoo_lead_draft_v1"
+DRAFT_TTL_HOURS = 24
+
+# Temporary browser data.
+# Keep technical resume/session markers in sessionStorage so a clean new browser
+# session does not inherit stale "backgrounded" flags from an older visit.
+APP_STATE_KEY = "abm_odoo_app_state_v1"
 RELOAD_FLAG_KEY = "abm_odoo_reload_requested_v1"
 
 FORM_FIELD_KEYS = (
@@ -33,8 +40,13 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _read_raw_storage(key_name: str, component_key: str):
-    expression = f"localStorage.getItem({_json(key_name)})"
+def _storage_js(storage_area: str) -> str:
+    return "sessionStorage" if storage_area == "session" else "localStorage"
+
+
+def _read_raw_storage(key_name: str, component_key: str, storage_area: str = "local"):
+    storage = _storage_js(storage_area)
+    expression = f"{storage}.getItem({_json(key_name)})"
     return streamlit_js_eval(
         js_expressions=expression,
         key=component_key,
@@ -42,8 +54,8 @@ def _read_raw_storage(key_name: str, component_key: str):
     )
 
 
-def read_json_storage(key_name: str, component_key: str, default=None):
-    raw = _read_raw_storage(key_name, component_key)
+def read_json_storage(key_name: str, component_key: str, default=None, storage_area: str = "local"):
+    raw = _read_raw_storage(key_name, component_key, storage_area=storage_area)
     if not raw:
         return default
     try:
@@ -52,8 +64,9 @@ def read_json_storage(key_name: str, component_key: str, default=None):
         return default
 
 
-def write_json_storage(key_name: str, value: dict, component_key: str):
-    expression = f"localStorage.setItem({_json(key_name)}, {_json(_json(value))})"
+def write_json_storage(key_name: str, value: dict, component_key: str, storage_area: str = "local"):
+    storage = _storage_js(storage_area)
+    expression = f"{storage}.setItem({_json(key_name)}, {_json(_json(value))})"
     streamlit_js_eval(
         js_expressions=expression,
         key=component_key,
@@ -61,8 +74,9 @@ def write_json_storage(key_name: str, value: dict, component_key: str):
     )
 
 
-def remove_storage(key_name: str, component_key: str):
-    expression = f"localStorage.removeItem({_json(key_name)})"
+def remove_storage(key_name: str, component_key: str, storage_area: str = "local"):
+    storage = _storage_js(storage_area)
+    expression = f"{storage}.removeItem({_json(key_name)})"
     streamlit_js_eval(
         js_expressions=expression,
         key=component_key,
@@ -73,7 +87,7 @@ def remove_storage(key_name: str, component_key: str):
 def reload_app(component_key: str = "reload_app"):
     payload = {"requested_at": now_iso(), "reason": "manual_streamlit_reload"}
     expression = (
-        f"localStorage.setItem({_json(RELOAD_FLAG_KEY)}, {_json(_json(payload))});"
+        f"sessionStorage.setItem({_json(RELOAD_FLAG_KEY)}, {_json(_json(payload))});"
         "window.location.reload();"
     )
     streamlit_js_eval(
@@ -91,14 +105,57 @@ def mark_current_session(current_session_id: str, component_key: str):
             "last_seen": now_iso(),
         },
         component_key=component_key,
+        storage_area="session",
     )
-    remove_storage(RELOAD_FLAG_KEY, component_key=f"{component_key}_clear_reload")
+    remove_storage(RELOAD_FLAG_KEY, component_key=f"{component_key}_clear_reload", storage_area="session")
+
+
+def _parse_iso_datetime(value: str | None):
+    if not value:
+        return None
+    try:
+        cleaned = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(cleaned)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def is_draft_expired(draft: dict | None) -> bool:
+    if not draft:
+        return False
+    saved_at = _parse_iso_datetime(str(draft.get("saved_at") or ""))
+    if not saved_at:
+        return False
+    return datetime.now(timezone.utc) - saved_at > timedelta(hours=DRAFT_TTL_HOURS)
 
 
 def get_browser_snapshot(current_session_id: str) -> dict:
-    app_state = read_json_storage(APP_STATE_KEY, "read_browser_app_state", default={}) or {}
-    draft = read_json_storage(DRAFT_KEY, "read_browser_draft", default={}) or {}
-    reload_flag = read_json_storage(RELOAD_FLAG_KEY, "read_browser_reload_flag", default={}) or {}
+    app_state = read_json_storage(
+        APP_STATE_KEY,
+        "read_browser_app_state",
+        default={},
+        storage_area="session",
+    ) or {}
+    draft = read_json_storage(
+        DRAFT_KEY,
+        "read_browser_draft",
+        default={},
+        storage_area="local",
+    ) or {}
+    reload_flag = read_json_storage(
+        RELOAD_FLAG_KEY,
+        "read_browser_reload_flag",
+        default={},
+        storage_area="session",
+    ) or {}
+
+    draft_expired = is_draft_expired(draft)
+    if draft_expired:
+        remove_storage(DRAFT_KEY, component_key="clear_expired_browser_draft", storage_area="local")
+        draft = {}
 
     saved_session_id = app_state.get("streamlit_session_id")
     draft_exists = has_meaningful_draft(draft)
@@ -118,6 +175,7 @@ def get_browser_snapshot(current_session_id: str) -> dict:
         "app_state": app_state,
         "draft": draft,
         "draft_exists": draft_exists,
+        "draft_expired": draft_expired,
         "reload_requested": reload_requested,
         "reload_flag": reload_flag,
     }
@@ -139,6 +197,7 @@ def build_draft_from_session(seller_name: str | None = None) -> dict:
     elif st.session_state.get("seller_name"):
         data["seller_name"] = st.session_state.get("seller_name")
     data["saved_at"] = now_iso()
+    data["source"] = "streamlit_session"
     return data
 
 
@@ -146,13 +205,25 @@ def save_local_draft(data: dict, component_key: str = "save_local_draft"):
     if has_meaningful_draft(data):
         payload = dict(data)
         payload["saved_at"] = now_iso()
-        write_json_storage(DRAFT_KEY, payload, component_key=component_key)
+        payload.setdefault("source", "streamlit_session")
+        write_json_storage(DRAFT_KEY, payload, component_key=component_key, storage_area="local")
     else:
-        remove_storage(DRAFT_KEY, component_key=f"{component_key}_clear")
+        remove_storage(DRAFT_KEY, component_key=f"{component_key}_clear", storage_area="local")
 
 
 def clear_local_draft(component_key: str = "clear_local_draft"):
-    remove_storage(DRAFT_KEY, component_key=component_key)
+    # Also write a short suppression marker so the browser-side DOM watcher does
+    # not immediately recreate the just-deleted draft from an old DOM during a
+    # Streamlit rerun after successful Odoo creation/update.
+    expression = (
+        f"localStorage.removeItem({_json(DRAFT_KEY)});"
+        "localStorage.setItem('abm_odoo_draft_suppressed_until_v1', String(Date.now() + 5000));"
+    )
+    streamlit_js_eval(
+        js_expressions=expression,
+        key=component_key,
+        want_output=False,
+    )
 
 
 def restore_draft_to_session_state(draft: dict, seller_names: list[str] | None = None):
@@ -171,16 +242,20 @@ def restore_draft_to_session_state(draft: dict, seller_names: list[str] | None =
 
     st.session_state["draft_restored"] = True
     st.session_state["draft_prompt_dismissed"] = True
+    st.session_state["suppress_draft_prompt"] = True
 
 
 def render_connection_watchdog():
     """Inject browser-side safeguards for mobile resume and local draft capture.
 
-    The critical parts run in the browser, not in Streamlit Python:
-    - when the page goes background, the browser marks it locally;
-    - when it returns, an immediate neutral overlay is displayed;
-    - after a short visible delay, the parent page reloads;
-    - draft data typed in the DOM is captured directly on input/change/pagehide.
+    Rules:
+    - localStorage is only used for the durable draft;
+    - sessionStorage is used for temporary resume/reload flags;
+    - pagehide saves the draft but no longer marks the app as backgrounded;
+    - opening the app normally must not trigger the resume overlay;
+    - returning from background shows a neutral overlay and reloads after a
+      short visible delay;
+    - the first user interaction after background is intercepted as a safety net.
     """
     html = r"""
 <script>
@@ -191,7 +266,9 @@ def render_connection_watchdog():
   const INTERNAL_RELOAD_KEY = "abm_odoo_internal_reload_v1";
   const RELOAD_FLAG_KEY = "__RELOAD_FLAG_KEY__";
   const DRAFT_KEY = "__DRAFT_KEY__";
+  const DRAFT_SUPPRESSED_UNTIL_KEY = "abm_odoo_draft_suppressed_until_v1";
   const MIN_OVERLAY_MS = 700;
+  const STUCK_OVERLAY_MS = 5000;
   let reloadScheduled = false;
   let draftSaveTimer = null;
 
@@ -208,20 +285,46 @@ def render_connection_watchdog():
     return getRootWindow().document || document;
   }
 
-  function storage() {
+  function localStore() {
     return getRootWindow().localStorage || window.localStorage;
   }
 
-  function safeStorageGet(key) {
-    try { return storage().getItem(key); } catch (error) { return null; }
+  function sessionStore() {
+    return getRootWindow().sessionStorage || window.sessionStorage;
   }
 
-  function safeStorageSet(key, value) {
-    try { storage().setItem(key, value); } catch (error) {}
+  function localGet(key) {
+    try { return localStore().getItem(key); } catch (error) { return null; }
   }
 
-  function safeStorageRemove(key) {
-    try { storage().removeItem(key); } catch (error) {}
+  function localSet(key, value) {
+    try { localStore().setItem(key, value); } catch (error) {}
+  }
+
+  function localRemove(key) {
+    try { localStore().removeItem(key); } catch (error) {}
+  }
+
+  function sessionGet(key) {
+    try { return sessionStore().getItem(key); } catch (error) { return null; }
+  }
+
+  function sessionSet(key, value) {
+    try { sessionStore().setItem(key, value); } catch (error) {}
+  }
+
+  function sessionRemove(key) {
+    try { sessionStore().removeItem(key); } catch (error) {}
+  }
+
+  function draftSaveSuppressed() {
+    const until = Number(localGet(DRAFT_SUPPRESSED_UNTIL_KEY) || "0");
+    if (!until) { return false; }
+    if (Date.now() > until) {
+      localRemove(DRAFT_SUPPRESSED_UNTIL_KEY);
+      return false;
+    }
+    return true;
   }
 
   function ensureResumeOverlay() {
@@ -251,7 +354,7 @@ def render_connection_watchdog():
           <div id="abm-resume-message" style="font-size:16px;line-height:1.45;color:#334155;margin-bottom:16px">
             L'application se remet à jour pour sécuriser votre saisie.
           </div>
-          <div style="display:flex;align-items:center;gap:12px;margin:8px 0 16px 0;color:#475569">
+          <div id="abm-resume-spinner" style="display:flex;align-items:center;gap:12px;margin:8px 0 16px 0;color:#475569">
             <div style="width:26px;height:26px;border:3px solid #cbd5e1;border-top-color:#2563eb;border-radius:50%;animation:abmSpin 1s linear infinite"></div>
             <div style="font-size:14px">Rechargement en cours...</div>
           </div>
@@ -261,6 +364,9 @@ def render_connection_watchdog():
           <div id="abm-resume-actions" style="display:none;margin-top:16px;gap:10px;flex-direction:column">
             <button id="abm-resume-reload-button" style="width:100%;border:0;border-radius:12px;background:#2563eb;color:white;font-size:17px;font-weight:700;padding:13px 16px;cursor:pointer">
               Recharger l'application
+            </button>
+            <button id="abm-resume-continue-button" style="width:100%;border:1px solid #cbd5e1;border-radius:12px;background:white;color:#334155;font-size:16px;font-weight:650;padding:12px 16px;cursor:pointer">
+              Continuer
             </button>
           </div>
         </div>`;
@@ -275,6 +381,16 @@ def render_connection_watchdog():
           requestReload("manual_resume_button", 0);
         });
       }
+      const continueButton = doc.getElementById("abm-resume-continue-button");
+      if (continueButton) {
+        continueButton.addEventListener("click", function () {
+          sessionRemove(BACKGROUNDED_KEY);
+          sessionRemove(HIDDEN_AT_KEY);
+          sessionRemove(INTERNAL_RELOAD_KEY);
+          reloadScheduled = false;
+          overlay.style.display = "none";
+        });
+      }
     }
     return overlay;
   }
@@ -284,11 +400,15 @@ def render_connection_watchdog():
     const overlay = ensureResumeOverlay();
     const body = doc.getElementById("abm-resume-message");
     const actions = doc.getElementById("abm-resume-actions");
+    const spinner = doc.getElementById("abm-resume-spinner");
     if (body) {
       body.textContent = message || "L'application se remet à jour pour sécuriser votre saisie.";
     }
     if (actions) {
       actions.style.display = showManualAction ? "flex" : "none";
+    }
+    if (spinner) {
+      spinner.style.display = showManualAction ? "none" : "flex";
     }
     overlay.style.display = "flex";
   }
@@ -315,7 +435,7 @@ def render_connection_watchdog():
   }
 
   function readExistingDraft() {
-    const raw = safeStorageGet(DRAFT_KEY);
+    const raw = localGet(DRAFT_KEY);
     if (!raw) { return {}; }
     try { return JSON.parse(raw) || {}; } catch (error) { return {}; }
   }
@@ -337,11 +457,14 @@ def render_connection_watchdog():
   }
 
   function saveDraftFromDom() {
+    if (draftSaveSuppressed()) {
+      return;
+    }
     const draft = collectDraftFromDom();
     if (hasMeaningfulDraft(draft)) {
-      safeStorageSet(DRAFT_KEY, JSON.stringify(draft));
+      localSet(DRAFT_KEY, JSON.stringify(draft));
     } else {
-      safeStorageRemove(DRAFT_KEY);
+      localRemove(DRAFT_KEY);
     }
   }
 
@@ -354,11 +477,11 @@ def render_connection_watchdog():
 
   function markBackgrounded() {
     saveDraftFromDom();
-    if (safeStorageGet(INTERNAL_RELOAD_KEY) === "1") {
+    if (sessionGet(INTERNAL_RELOAD_KEY) === "1") {
       return;
     }
-    safeStorageSet(BACKGROUNDED_KEY, "1");
-    safeStorageSet(HIDDEN_AT_KEY, String(Date.now()));
+    sessionSet(BACKGROUNDED_KEY, "1");
+    sessionSet(HIDDEN_AT_KEY, String(Date.now()));
   }
 
   function requestReload(reason, delayMs) {
@@ -372,16 +495,35 @@ def render_connection_watchdog():
       requested_at: new Date().toISOString(),
       reason: reason || "background_resume"
     });
-    safeStorageSet(RELOAD_FLAG_KEY, payload);
-    safeStorageRemove(BACKGROUNDED_KEY);
-    safeStorageSet(INTERNAL_RELOAD_KEY, "1");
+    sessionSet(RELOAD_FLAG_KEY, payload);
+    sessionRemove(BACKGROUNDED_KEY);
+    sessionRemove(HIDDEN_AT_KEY);
+    sessionSet(INTERNAL_RELOAD_KEY, "1");
+
     setTimeout(function () {
-      getRootWindow().location.reload();
+      const overlay = getRootDocument().getElementById(RESUME_OVERLAY_ID);
+      if (overlay && reloadScheduled) {
+        showResumeOverlay(
+          "La préparation prend plus de temps que prévu. Votre brouillon reste conservé.",
+          true
+        );
+      }
+    }, STUCK_OVERLAY_MS);
+
+    setTimeout(function () {
+      try {
+        getRootWindow().location.reload();
+      } catch (error) {
+        showResumeOverlay(
+          "La préparation prend plus de temps que prévu. Votre brouillon reste conservé.",
+          true
+        );
+      }
     }, typeof delayMs === "number" ? delayMs : MIN_OVERLAY_MS);
   }
 
   function needsResumeReload() {
-    return safeStorageGet(BACKGROUNDED_KEY) === "1";
+    return sessionGet(BACKGROUNDED_KEY) === "1";
   }
 
   function handleReturnToForeground() {
@@ -409,9 +551,13 @@ def render_connection_watchdog():
   }
 
   try {
-    safeStorageRemove(INTERNAL_RELOAD_KEY);
-
     const doc = getRootDocument();
+
+    // Clean the internal reload marker shortly after the new page has had time
+    // to settle. Do not remove it synchronously; pagehide/visibilitychange can
+    // still fire during reload on some mobile browsers.
+    setTimeout(function () { sessionRemove(INTERNAL_RELOAD_KEY); }, 1500);
+
     doc.addEventListener("input", scheduleDraftSave, true);
     doc.addEventListener("change", scheduleDraftSave, true);
 
@@ -427,8 +573,10 @@ def render_connection_watchdog():
       }
     });
 
+    // pagehide is not proof that the user reduced the app; it also occurs on
+    // normal reload/navigation. Use it only as a last chance to save the draft.
     getRootWindow().addEventListener("pagehide", function () {
-      markBackgrounded();
+      saveDraftFromDom();
     });
 
     getRootWindow().addEventListener("pageshow", function () {
