@@ -31,7 +31,6 @@ from odoo_streamlit.browser_state import (
     get_browser_snapshot,
     has_meaningful_draft,
     mark_current_session,
-    reload_app,
     render_connection_watchdog,
     restore_draft_to_session_state,
     save_local_draft,
@@ -54,6 +53,7 @@ APP_STATE_KEYS = (
     "streamlit_session_id",
     "draft_restored",
     "draft_prompt_dismissed",
+    "session_reset_acknowledged",
 )
 
 
@@ -106,6 +106,7 @@ def _init_state():
         "pending_local_draft_clear": False,
         "draft_restored": False,
         "draft_prompt_dismissed": False,
+        "session_reset_acknowledged": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -287,21 +288,39 @@ def render_session_reset_block(snapshot, seller_names):
         with col1:
             if st.button("Reprendre le brouillon", type="primary", key="restore_draft_after_reset"):
                 restore_draft_to_session_state(draft, seller_names=seller_names)
-                mark_current_session(st.session_state["streamlit_session_id"], component_key="mark_session_after_restore")
+                st.session_state["session_reset_acknowledged"] = True
+                st.session_state["result_banner"] = {
+                    "status": "success",
+                    "message": "Brouillon restauré. Vérifiez les informations avant de prévisualiser.",
+                }
                 st.rerun()
         with col2:
             if st.button("Effacer et recommencer", key="clear_draft_after_reset"):
+                st.session_state["session_reset_acknowledged"] = True
                 st.session_state["pending_local_draft_clear"] = True
                 request_full_reset(clear_banner=True)
-                mark_current_session(st.session_state["streamlit_session_id"], component_key="mark_session_after_clear")
+                st.session_state["result_banner"] = {
+                    "status": "warning",
+                    "message": "Brouillon supprimé. Vous pouvez recommencer une nouvelle saisie.",
+                }
                 st.rerun()
         with col3:
             if st.button("Recharger l'application", key="reload_after_reset"):
-                reload_app(component_key="reload_after_reset_js")
+                st.session_state["session_reset_acknowledged"] = True
+                st.session_state["result_banner"] = {
+                    "status": "warning",
+                    "message": "Session réinitialisée acceptée. Le brouillon reste disponible si vous souhaitez le reprendre.",
+                }
+                st.rerun()
     else:
         st.warning("Aucun brouillon local n'a été retrouvé.")
         if st.button("Recharger l'application", type="primary", key="reload_after_reset_no_draft"):
-            reload_app(component_key="reload_after_reset_no_draft_js")
+            st.session_state["session_reset_acknowledged"] = True
+            st.session_state["result_banner"] = {
+                "status": "warning",
+                "message": "Session réinitialisée acceptée. Vous pouvez recommencer une nouvelle saisie.",
+            }
+            st.rerun()
 
     st.stop()
 
@@ -374,7 +393,7 @@ seller_names = list(seller_options.keys())
 snapshot = get_browser_snapshot(st.session_state["streamlit_session_id"])
 status = snapshot.get("status")
 
-if status == "session_reset":
+if status == "session_reset" and not st.session_state.get("session_reset_acknowledged"):
     render_session_reset_block(snapshot, seller_names=seller_names)
 else:
     mark_current_session(st.session_state["streamlit_session_id"], component_key=f"mark_session_{status}")
