@@ -12,6 +12,7 @@ AUTH_SESSION_KEYS = (
     "authenticated",
     "auth_user",
     "cookie_bootstrap_done",
+    "auth_cookie_cache",
 )
 
 
@@ -49,8 +50,15 @@ def init_auth_state():
 
 
 def get_cookie_value(cookie_name: str) -> str:
-    cookies = COOKIE_MANAGER.get_all() or {}
-    return cookies.get(cookie_name, "")
+    """Return a cookie value while calling CookieManager only once per Streamlit run.
+
+    extra-streamlit-components renders a custom component for get_all().
+    Calling it multiple times in the same run with the same internal key can trigger
+    StreamlitDuplicateElementKey. Caching the result in session_state avoids that.
+    """
+    if "auth_cookie_cache" not in st.session_state:
+        st.session_state["auth_cookie_cache"] = COOKIE_MANAGER.get_all() or {}
+    return st.session_state["auth_cookie_cache"].get(cookie_name, "")
 
 
 def set_auth_cookie(config: AuthConfig):
@@ -59,6 +67,7 @@ def set_auth_cookie(config: AuthConfig):
         config.expected_cookie_value,
         expires_at=datetime.now() + timedelta(days=config.cookie_expiry_days),
     )
+    st.session_state["auth_cookie_cache"] = {config.cookie_name: config.expected_cookie_value}
     time.sleep(0.5)
 
 
@@ -68,6 +77,7 @@ def clear_auth_cookie(config: AuthConfig):
         "",
         expires_at=datetime.now() - timedelta(days=1),
     )
+    st.session_state["auth_cookie_cache"] = {}
     time.sleep(0.5)
 
 
@@ -133,11 +143,14 @@ def require_simple_auth():
     init_auth_state()
     bootstrap_auth(config)
 
-    if restore_auth_from_cookie(config):
+    # Do not call restore_auth_from_cookie() a second time in the same run.
+    # CookieManager.get_all() is a Streamlit component and duplicate calls can
+    # raise StreamlitDuplicateElementKey. bootstrap_auth() already restored the
+    # session if a valid cookie exists.
+    if st.session_state.get("authenticated"):
         return
 
-    if not st.session_state["authenticated"]:
-        render_login_form(config)
+    render_login_form(config)
 
 
 def render_logout(app_state_keys):
