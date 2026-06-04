@@ -269,6 +269,21 @@ def ensure_form_widgets_initialized():
             st.session_state[key] = form_data.get(key, "")
 
 
+def has_confirmed_odoo_success_banner():
+    """Return True when the visible banner already confirms an Odoo write.
+
+    In that situation, any stale local draft still visible in localStorage is only
+    a browser-side cleanup timing artifact. It must not be shown to the user as
+    an unsubmitted draft because the green Odoo banner is the authoritative
+    business confirmation.
+    """
+    banner = st.session_state.get("result_banner") or {}
+    if banner.get("status") != "success":
+        return False
+    message = str(banner.get("message") or "")
+    return "Brouillon local supprimé" in message or "Odoo" in message
+
+
 def render_session_reset_block(snapshot, seller_names):
     draft = snapshot.get("draft") or {}
     draft_exists = snapshot.get("draft_exists", False)
@@ -325,6 +340,12 @@ def render_session_reset_block(snapshot, seller_names):
     st.stop()
 
 def render_draft_prompt(draft, seller_names):
+    # Après une création/mise à jour Odoo confirmée, le bandeau vert avec l'ID
+    # fait foi. Le brouillon local est en cours de suppression côté navigateur :
+    # on ne doit pas afficher un faux message "brouillon non envoyé".
+    if has_confirmed_odoo_success_banner():
+        return
+
     if not has_meaningful_draft(draft):
         return
     if st.session_state.get("draft_prompt_dismissed"):
@@ -411,7 +432,11 @@ snapshot = get_browser_snapshot(st.session_state["streamlit_session_id"])
 status = snapshot.get("status")
 render_resume_reload_notice(snapshot)
 
-if status == "session_reset" and not st.session_state.get("session_reset_acknowledged"):
+if (
+    status == "session_reset"
+    and not st.session_state.get("session_reset_acknowledged")
+    and not has_confirmed_odoo_success_banner()
+):
     render_session_reset_block(snapshot, seller_names=seller_names)
 else:
     mark_current_session(st.session_state["streamlit_session_id"], component_key=f"mark_session_{status}")
