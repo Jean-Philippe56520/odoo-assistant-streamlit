@@ -33,6 +33,7 @@ from odoo_streamlit.browser_state import (
     mark_current_session,
     render_connection_watchdog,
     restore_draft_to_session_state,
+    save_last_seller_name,
     save_local_draft,
 )
 
@@ -463,7 +464,12 @@ else:
 ensure_form_widgets_initialized()
 render_draft_prompt(snapshot.get("draft") or {}, seller_names=seller_names)
 
-current_seller = st.session_state.get("seller_selectbox") or st.session_state.get("seller_name")
+last_seller_name = str(snapshot.get("last_seller_name") or "").strip()
+current_seller = (
+    st.session_state.get("seller_selectbox")
+    or st.session_state.get("seller_name")
+    or last_seller_name
+)
 if current_seller not in seller_options:
     current_seller = seller_names[0]
 
@@ -476,6 +482,7 @@ seller_name = st.selectbox(
 )
 st.session_state["seller_name"] = seller_name
 st.session_state["seller_user_id"] = seller_options[seller_name]
+save_last_seller_name(seller_name, component_key="save_current_seller_name")
 
 st.subheader("Contact")
 st.text_input("Nom de l'entreprise *", key="partner_name", on_change=handle_form_change)

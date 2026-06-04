@@ -10,6 +10,7 @@ from streamlit_js_eval import streamlit_js_eval
 # Keep the draft in localStorage so it survives page reloads and browser restarts.
 DRAFT_KEY = "abm_odoo_lead_draft_v1"
 DRAFT_TTL_HOURS = 24
+LAST_SELLER_KEY = "abm_odoo_last_seller_name_v1"
 
 # Temporary browser data.
 # Keep technical resume/session markers in sessionStorage so a clean new browser
@@ -151,6 +152,12 @@ def get_browser_snapshot(current_session_id: str) -> dict:
         default={},
         storage_area="session",
     ) or {}
+    last_seller_name = _read_raw_storage(
+        LAST_SELLER_KEY,
+        "read_last_seller_name",
+        storage_area="local",
+    )
+    last_seller_name = str(last_seller_name or "").strip()
 
     draft_expired = is_draft_expired(draft)
     if draft_expired:
@@ -178,6 +185,7 @@ def get_browser_snapshot(current_session_id: str) -> dict:
         "draft_expired": draft_expired,
         "reload_requested": reload_requested,
         "reload_flag": reload_flag,
+        "last_seller_name": last_seller_name,
     }
 
 
@@ -209,6 +217,22 @@ def save_local_draft(data: dict, component_key: str = "save_local_draft"):
         write_json_storage(DRAFT_KEY, payload, component_key=component_key, storage_area="local")
     else:
         remove_storage(DRAFT_KEY, component_key=f"{component_key}_clear", storage_area="local")
+
+
+def save_last_seller_name(seller_name: str | None, component_key: str = "save_last_seller_name"):
+    seller = str(seller_name or "").strip()
+    if not seller:
+        return
+    expression = f"localStorage.setItem({_json(LAST_SELLER_KEY)}, {_json(seller)})"
+    streamlit_js_eval(
+        js_expressions=expression,
+        key=component_key,
+        want_output=False,
+    )
+
+
+def clear_last_seller_name(component_key: str = "clear_last_seller_name"):
+    remove_storage(LAST_SELLER_KEY, component_key=component_key, storage_area="local")
 
 
 def clear_local_draft(component_key: str = "clear_local_draft"):
@@ -266,6 +290,7 @@ def render_connection_watchdog():
   const INTERNAL_RELOAD_KEY = "abm_odoo_internal_reload_v1";
   const RELOAD_FLAG_KEY = "__RELOAD_FLAG_KEY__";
   const DRAFT_KEY = "__DRAFT_KEY__";
+  const LAST_SELLER_KEY = "__LAST_SELLER_KEY__";
   const DRAFT_SUPPRESSED_UNTIL_KEY = "abm_odoo_draft_suppressed_until_v1";
   const MIN_OVERLAY_MS = 700;
   const STUCK_OVERLAY_MS = 5000;
@@ -440,6 +465,28 @@ def render_connection_watchdog():
     try { return JSON.parse(raw) || {}; } catch (error) { return {}; }
   }
 
+  function findSellerValueFromDom() {
+    const doc = getRootDocument();
+    const labels = Array.from(doc.querySelectorAll('label, [aria-label]'));
+    for (const label of labels) {
+      const text = String(label.textContent || label.getAttribute('aria-label') || '').trim().toLowerCase();
+      if (text !== 'commercial') { continue; }
+      const container = label.closest('[data-testid="stSelectbox"], div');
+      if (!container) { continue; }
+      const selected = container.querySelector('[data-baseweb="select"] [title], [data-baseweb="select"] div[role="button"], [data-baseweb="select"]');
+      const value = String((selected && (selected.getAttribute('title') || selected.textContent)) || '').trim();
+      if (value && value.toLowerCase() !== 'commercial') { return value; }
+    }
+    return '';
+  }
+
+  function saveLastSellerFromDom() {
+    const seller = findSellerValueFromDom();
+    if (seller) {
+      localSet(LAST_SELLER_KEY, seller);
+    }
+  }
+
   function collectDraftFromDom() {
     const doc = getRootDocument();
     const draft = Object.assign({}, readExistingDraft());
@@ -451,6 +498,11 @@ def render_connection_watchdog():
         draft[key] = String(element.value || "");
       }
     });
+    const seller = findSellerValueFromDom();
+    if (seller) {
+      draft.seller_name = seller;
+      localSet(LAST_SELLER_KEY, seller);
+    }
     draft.saved_at = new Date().toISOString();
     draft.source = "browser_dom";
     return draft;
@@ -559,7 +611,10 @@ def render_connection_watchdog():
     setTimeout(function () { sessionRemove(INTERNAL_RELOAD_KEY); }, 1500);
 
     doc.addEventListener("input", scheduleDraftSave, true);
-    doc.addEventListener("change", scheduleDraftSave, true);
+    doc.addEventListener("change", function () {
+      saveLastSellerFromDom();
+      scheduleDraftSave();
+    }, true);
 
     if (!doc.hidden && needsResumeReload()) {
       requestReload("initial_visible_with_background_flag", MIN_OVERLAY_MS);
@@ -611,5 +666,5 @@ def render_connection_watchdog():
   }
 })();
 </script>
-    """.replace("__RELOAD_FLAG_KEY__", RELOAD_FLAG_KEY).replace("__DRAFT_KEY__", DRAFT_KEY)
+    """.replace("__RELOAD_FLAG_KEY__", RELOAD_FLAG_KEY).replace("__DRAFT_KEY__", DRAFT_KEY).replace("__LAST_SELLER_KEY__", LAST_SELLER_KEY)
     components.html(html, height=0, width=0)
