@@ -137,7 +137,11 @@ def _apply_pending_resets():
     if pending_seller:
         save_last_seller_name(pending_seller, component_key="save_last_successful_seller_name")
         st.session_state["seller_name"] = pending_seller
-        st.session_state["seller_selectbox"] = pending_seller
+        # Ne jamais écrire directement dans st.session_state["seller_selectbox"] ici.
+        # C'est une clé de widget Streamlit : si le selectbox a déjà été instancié
+        # dans le run courant, Streamlit lève une StreamlitAPIException.
+        # Le widget garde déjà la valeur sélectionnée lors de l'envoi réussi ;
+        # la persistance durable est assurée par save_last_seller_name().
         st.session_state["pending_last_successful_seller_name"] = None
 
     if st.session_state.get("pending_local_draft_clear"):
@@ -179,9 +183,13 @@ def request_preview_reset():
 
 def request_full_reset(clear_banner=False, clear_local_draft_after_rerun=False, successful_seller_name=None):
     if successful_seller_name:
-        st.session_state["pending_last_successful_seller_name"] = str(successful_seller_name).strip()
-        st.session_state["seller_name"] = str(successful_seller_name).strip()
-        st.session_state["seller_selectbox"] = str(successful_seller_name).strip()
+        cleaned_seller_name = str(successful_seller_name).strip()
+        st.session_state["pending_last_successful_seller_name"] = cleaned_seller_name
+        st.session_state["seller_name"] = cleaned_seller_name
+        # Ne pas écrire dans st.session_state["seller_selectbox"] après rendu du widget.
+        # Le reset complet est demandé après un clic de validation : à ce stade,
+        # le widget existe déjà dans le run courant, donc Streamlit interdit
+        # toute mutation directe de sa clé.
     if clear_banner:
         st.session_state["result_banner"] = None
     if clear_local_draft_after_rerun:
