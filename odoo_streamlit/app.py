@@ -273,16 +273,16 @@ def render_session_reset_block(snapshot, seller_names):
     draft = snapshot.get("draft") or {}
     draft_exists = snapshot.get("draft_exists", False)
 
-    st.error("Session réinitialisée", icon="⚠️")
+    st.info("Application remise à jour", icon="ℹ️")
     st.write(
-        "L'application a redémarré pendant votre absence. "
-        "Par sécurité, rechargez l'application avant de continuer."
+        "L'application a été relancée pour sécuriser la saisie. "
+        "Votre brouillon local est conservé s'il existe."
     )
 
     if draft_exists:
         st.info(
             "Un brouillon non envoyé a été retrouvé sur cet appareil. "
-            "Il sera conservé après rechargement."
+            "Vous pouvez le reprendre ou recommencer une saisie propre."
         )
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -305,25 +305,24 @@ def render_session_reset_block(snapshot, seller_names):
                 }
                 st.rerun()
         with col3:
-            if st.button("Recharger l'application", key="reload_after_reset"):
+            if st.button("Continuer", key="continue_after_reset"):
                 st.session_state["session_reset_acknowledged"] = True
                 st.session_state["result_banner"] = {
                     "status": "warning",
-                    "message": "Session réinitialisée acceptée. Le brouillon reste disponible si vous souhaitez le reprendre.",
+                    "message": "Application remise à jour. Le brouillon reste disponible si vous souhaitez le reprendre.",
                 }
                 st.rerun()
     else:
-        st.warning("Aucun brouillon local n'a été retrouvé.")
-        if st.button("Recharger l'application", type="primary", key="reload_after_reset_no_draft"):
+        st.write("Aucun brouillon local n'a été retrouvé. Vous pouvez commencer une nouvelle saisie.")
+        if st.button("Continuer", type="primary", key="continue_after_reset_no_draft"):
             st.session_state["session_reset_acknowledged"] = True
             st.session_state["result_banner"] = {
                 "status": "warning",
-                "message": "Session réinitialisée acceptée. Vous pouvez recommencer une nouvelle saisie.",
+                "message": "Application remise à jour. Vous pouvez recommencer une nouvelle saisie.",
             }
             st.rerun()
 
     st.stop()
-
 
 def render_draft_prompt(draft, seller_names):
     if not has_meaningful_draft(draft):
@@ -370,12 +369,12 @@ def render_resume_reload_notice(snapshot):
     draft_exists = snapshot.get("draft_exists", False)
     if draft_exists:
         st.info(
-            "Application rechargée après retour au premier plan. "
+            "Application remise à jour après retour au premier plan. "
             "Un brouillon non envoyé a été retrouvé sur cet appareil."
         )
     else:
         st.info(
-            "Application rechargée après retour au premier plan. "
+            "Application remise à jour après retour au premier plan. "
             "Vous pouvez commencer une nouvelle saisie."
         )
 

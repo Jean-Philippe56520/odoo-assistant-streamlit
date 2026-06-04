@@ -71,7 +71,7 @@ def remove_storage(key_name: str, component_key: str):
 
 
 def reload_app(component_key: str = "reload_app"):
-    payload = {"requested_at": now_iso()}
+    payload = {"requested_at": now_iso(), "reason": "manual_streamlit_reload"}
     expression = (
         f"localStorage.setItem({_json(RELOAD_FLAG_KEY)}, {_json(_json(payload))});"
         "window.location.reload();"
@@ -174,261 +174,294 @@ def restore_draft_to_session_state(draft: dict, seller_names: list[str] | None =
 
 
 def render_connection_watchdog():
+    """Inject browser-side safeguards for mobile resume and local draft capture.
+
+    The critical parts run in the browser, not in Streamlit Python:
+    - when the page goes background, the browser marks it locally;
+    - when it returns, an immediate neutral overlay is displayed;
+    - after a short visible delay, the parent page reloads;
+    - draft data typed in the DOM is captured directly on input/change/pagehide.
+    """
     html = r"""
 <script>
 (function () {
-  const CONNECTION_OVERLAY_ID = "abm-connection-overlay";
   const RESUME_OVERLAY_ID = "abm-resume-overlay";
-  const HEALTH_URL = window.location.origin + "/_stcore/health";
   const BACKGROUNDED_KEY = "abm_odoo_app_was_backgrounded_v1";
   const HIDDEN_AT_KEY = "abm_odoo_hidden_at_v1";
   const INTERNAL_RELOAD_KEY = "abm_odoo_internal_reload_v1";
   const RELOAD_FLAG_KEY = "__RELOAD_FLAG_KEY__";
-  let resumeCheckInProgress = false;
+  const DRAFT_KEY = "__DRAFT_KEY__";
+  const MIN_OVERLAY_MS = 700;
+  let reloadScheduled = false;
+  let draftSaveTimer = null;
 
-  function storage() {
-    return window.parent.localStorage;
+  function getRootWindow() {
+    try {
+      if (window.parent && window.parent.document) {
+        return window.parent;
+      }
+    } catch (error) {}
+    return window;
   }
 
-  function ensureConnectionOverlay() {
-    let overlay = window.parent.document.getElementById(CONNECTION_OVERLAY_ID);
-    if (!overlay) {
-      overlay = window.parent.document.createElement("div");
-      overlay.id = CONNECTION_OVERLAY_ID;
-      overlay.style.cssText = [
-        "display:none",
-        "position:fixed",
-        "z-index:2147483646",
-        "left:0",
-        "right:0",
-        "bottom:0",
-        "padding:14px 16px",
-        "background:#7f1d1d",
-        "color:white",
-        "font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-        "font-size:15px",
-        "box-shadow:0 -2px 12px rgba(0,0,0,0.25)"
-      ].join(";");
-      overlay.innerHTML = '<strong>Connexion interrompue.</strong><br>L\'application ne répond pas correctement. Vérifiez le réseau ou rechargez avant de continuer.';
-      window.parent.document.body.appendChild(overlay);
-    }
-    return overlay;
+  function getRootDocument() {
+    return getRootWindow().document || document;
+  }
+
+  function storage() {
+    return getRootWindow().localStorage || window.localStorage;
+  }
+
+  function safeStorageGet(key) {
+    try { return storage().getItem(key); } catch (error) { return null; }
+  }
+
+  function safeStorageSet(key, value) {
+    try { storage().setItem(key, value); } catch (error) {}
+  }
+
+  function safeStorageRemove(key) {
+    try { storage().removeItem(key); } catch (error) {}
   }
 
   function ensureResumeOverlay() {
-    let overlay = window.parent.document.getElementById(RESUME_OVERLAY_ID);
+    const doc = getRootDocument();
+    let overlay = doc.getElementById(RESUME_OVERLAY_ID);
     if (!overlay) {
-      overlay = window.parent.document.createElement("div");
+      overlay = doc.createElement("div");
       overlay.id = RESUME_OVERLAY_ID;
+      overlay.setAttribute("aria-live", "polite");
       overlay.style.cssText = [
         "display:none",
         "position:fixed",
         "z-index:2147483647",
         "inset:0",
-        "background:rgba(2,6,23,0.92)",
-        "color:white",
+        "background:rgba(248,250,252,0.98)",
+        "color:#0f172a",
         "font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "padding:22px",
         "box-sizing:border-box",
         "align-items:center",
-        "justify-content:center"
+        "justify-content:center",
+        "text-align:left"
       ].join(";");
       overlay.innerHTML = `
-        <div style="max-width:540px;width:100%;background:#111827;border:1px solid #374151;border-radius:18px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,.45)">
-          <div id="abm-resume-title" style="font-size:22px;font-weight:750;margin-bottom:10px">Vérification de l'application</div>
-          <div id="abm-resume-message" style="font-size:16px;line-height:1.45;color:#d1d5db;margin-bottom:16px">
-            L'application revient au premier plan. Vérification en cours avant de continuer.
+        <div style="max-width:520px;width:100%;background:#ffffff;border:1px solid #e5e7eb;border-radius:18px;padding:22px;box-shadow:0 18px 50px rgba(15,23,42,.16)">
+          <div style="font-size:22px;font-weight:750;margin-bottom:10px;color:#0f172a">Préparation de l'application</div>
+          <div id="abm-resume-message" style="font-size:16px;line-height:1.45;color:#334155;margin-bottom:16px">
+            L'application se remet à jour pour sécuriser votre saisie.
           </div>
-          <div id="abm-resume-spinner" style="width:32px;height:32px;border:4px solid #374151;border-top-color:#ffffff;border-radius:50%;animation:abmSpin 1s linear infinite;margin:8px auto 16px auto"></div>
-          <div id="abm-resume-actions" style="display:none;gap:10px;flex-direction:column">
-            <button id="abm-resume-retry-button" style="width:100%;border:0;border-radius:12px;background:#2563eb;color:white;font-size:17px;font-weight:700;padding:13px 16px;cursor:pointer">
-              Réessayer
-            </button>
-            <button id="abm-resume-reload-button" style="width:100%;border:0;border-radius:12px;background:#ef4444;color:white;font-size:17px;font-weight:700;padding:13px 16px;cursor:pointer">
+          <div style="display:flex;align-items:center;gap:12px;margin:8px 0 16px 0;color:#475569">
+            <div style="width:26px;height:26px;border:3px solid #cbd5e1;border-top-color:#2563eb;border-radius:50%;animation:abmSpin 1s linear infinite"></div>
+            <div style="font-size:14px">Rechargement en cours...</div>
+          </div>
+          <div style="font-size:13px;line-height:1.35;color:#64748b">
+            Si une saisie était commencée, le brouillon local sera conservé et pourra être repris après rechargement.
+          </div>
+          <div id="abm-resume-actions" style="display:none;margin-top:16px;gap:10px;flex-direction:column">
+            <button id="abm-resume-reload-button" style="width:100%;border:0;border-radius:12px;background:#2563eb;color:white;font-size:17px;font-weight:700;padding:13px 16px;cursor:pointer">
               Recharger l'application
             </button>
           </div>
-          <div style="font-size:13px;line-height:1.35;color:#9ca3af;margin-top:12px">
-            Si une saisie était commencée, le brouillon local sera conservé et pourra être repris après rechargement.
-          </div>
         </div>`;
-      const style = window.parent.document.createElement("style");
+      const style = doc.createElement("style");
       style.textContent = "@keyframes abmSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}";
-      window.parent.document.head.appendChild(style);
-      window.parent.document.body.appendChild(overlay);
+      doc.head.appendChild(style);
+      doc.body.appendChild(overlay);
 
-      const retryButton = window.parent.document.getElementById("abm-resume-retry-button");
-      if (retryButton) {
-        retryButton.addEventListener("click", function () {
-          verifyThenReload("manual_retry");
-        });
-      }
-
-      const reloadButton = window.parent.document.getElementById("abm-resume-reload-button");
+      const reloadButton = doc.getElementById("abm-resume-reload-button");
       if (reloadButton) {
         reloadButton.addEventListener("click", function () {
-          requestReload("manual_resume_button");
+          requestReload("manual_resume_button", 0);
         });
       }
     }
     return overlay;
   }
 
-  function showConnectionOverlay() {
-    ensureConnectionOverlay().style.display = "block";
-  }
-
-  function hideConnectionOverlay() {
-    ensureConnectionOverlay().style.display = "none";
-  }
-
-  function showResumeOverlay(message, isError) {
+  function showResumeOverlay(message, showManualAction) {
+    const doc = getRootDocument();
     const overlay = ensureResumeOverlay();
-    const title = window.parent.document.getElementById("abm-resume-title");
-    const body = window.parent.document.getElementById("abm-resume-message");
-    const spinner = window.parent.document.getElementById("abm-resume-spinner");
-    const actions = window.parent.document.getElementById("abm-resume-actions");
-    if (title) { title.textContent = isError ? "Connexion interrompue" : "Vérification de l'application"; }
-    if (body) { body.textContent = message; }
-    if (spinner) { spinner.style.display = isError ? "none" : "block"; }
-    if (actions) { actions.style.display = isError ? "flex" : "none"; }
+    const body = doc.getElementById("abm-resume-message");
+    const actions = doc.getElementById("abm-resume-actions");
+    if (body) {
+      body.textContent = message || "L'application se remet à jour pour sécuriser votre saisie.";
+    }
+    if (actions) {
+      actions.style.display = showManualAction ? "flex" : "none";
+    }
     overlay.style.display = "flex";
   }
 
-  function markBackgrounded() {
-    if (storage().getItem(INTERNAL_RELOAD_KEY) === "1") {
-      return;
-    }
-    storage().setItem(BACKGROUNDED_KEY, "1");
-    storage().setItem(HIDDEN_AT_KEY, String(Date.now()));
+  function formFieldDescriptors() {
+    return [
+      ["partner_name", "input[aria-label=\"Nom de l'entreprise *\"]"],
+      ["contact_name", "input[aria-label=\"Nom du contact\"]"],
+      ["phone", "input[aria-label=\"Téléphone\"]"],
+      ["mobile", "input[aria-label=\"Mobile\"]"],
+      ["email_from", "input[aria-label=\"Email\"]"],
+      ["street", "input[aria-label=\"Adresse\"]"],
+      ["street2", "input[aria-label=\"Complément d'adresse\"]"],
+      ["zip", "input[aria-label=\"Code postal\"]"],
+      ["city", "input[aria-label=\"Ville\"]"],
+      ["current_equipment", "textarea[aria-label=\"Équipement actuel\"]"],
+      ["free_comment", "textarea[aria-label=\"Commentaire libre\"]"]
+    ];
   }
 
-  function requestReload(reason) {
+  function hasMeaningfulDraft(data) {
+    const keys = ["partner_name", "contact_name", "phone", "mobile", "email_from", "street", "street2", "zip", "city", "current_equipment", "free_comment", "seller_name"];
+    return keys.some(function (key) { return String((data && data[key]) || "").trim().length > 0; });
+  }
+
+  function readExistingDraft() {
+    const raw = safeStorageGet(DRAFT_KEY);
+    if (!raw) { return {}; }
+    try { return JSON.parse(raw) || {}; } catch (error) { return {}; }
+  }
+
+  function collectDraftFromDom() {
+    const doc = getRootDocument();
+    const draft = Object.assign({}, readExistingDraft());
+    formFieldDescriptors().forEach(function (pair) {
+      const key = pair[0];
+      const selector = pair[1];
+      const element = doc.querySelector(selector);
+      if (element && typeof element.value !== "undefined") {
+        draft[key] = String(element.value || "");
+      }
+    });
+    draft.saved_at = new Date().toISOString();
+    draft.source = "browser_dom";
+    return draft;
+  }
+
+  function saveDraftFromDom() {
+    const draft = collectDraftFromDom();
+    if (hasMeaningfulDraft(draft)) {
+      safeStorageSet(DRAFT_KEY, JSON.stringify(draft));
+    } else {
+      safeStorageRemove(DRAFT_KEY);
+    }
+  }
+
+  function scheduleDraftSave() {
+    if (draftSaveTimer) {
+      clearTimeout(draftSaveTimer);
+    }
+    draftSaveTimer = setTimeout(saveDraftFromDom, 120);
+  }
+
+  function markBackgrounded() {
+    saveDraftFromDom();
+    if (safeStorageGet(INTERNAL_RELOAD_KEY) === "1") {
+      return;
+    }
+    safeStorageSet(BACKGROUNDED_KEY, "1");
+    safeStorageSet(HIDDEN_AT_KEY, String(Date.now()));
+  }
+
+  function requestReload(reason, delayMs) {
+    if (reloadScheduled) {
+      return;
+    }
+    reloadScheduled = true;
+    saveDraftFromDom();
+    showResumeOverlay("L'application se remet à jour pour sécuriser votre saisie.", false);
     const payload = JSON.stringify({
       requested_at: new Date().toISOString(),
       reason: reason || "background_resume"
     });
-    storage().setItem(RELOAD_FLAG_KEY, payload);
-    storage().removeItem(BACKGROUNDED_KEY);
-    storage().setItem(INTERNAL_RELOAD_KEY, "1");
-    window.parent.location.reload();
-  }
-
-  async function fetchHealth(timeoutMs) {
-    const controller = new AbortController();
-    const timer = setTimeout(function () { controller.abort(); }, timeoutMs || 3500);
-    try {
-      const response = await fetch(HEALTH_URL, {
-        method: "GET",
-        cache: "no-store",
-        signal: controller.signal
-      });
-      clearTimeout(timer);
-      return response.ok;
-    } catch (error) {
-      clearTimeout(timer);
-      return false;
-    }
-  }
-
-  async function verifyThenReload(reason) {
-    if (resumeCheckInProgress) {
-      return;
-    }
-    resumeCheckInProgress = true;
-    showResumeOverlay(
-      "L'application revient au premier plan. Vérification en cours avant rechargement sécurisé.",
-      false
-    );
-    const ok = await fetchHealth(3500);
-    if (ok) {
-      requestReload(reason || "background_resume");
-      return;
-    }
-    resumeCheckInProgress = false;
-    showResumeOverlay(
-      "L'application ne répond pas correctement. Vérifiez votre réseau, puis réessayez ou rechargez l'application.",
-      true
-    );
-  }
-
-  async function checkHealth() {
-    const ok = await fetchHealth(4000);
-    if (ok) {
-      hideConnectionOverlay();
-    } else {
-      showConnectionOverlay();
-    }
+    safeStorageSet(RELOAD_FLAG_KEY, payload);
+    safeStorageRemove(BACKGROUNDED_KEY);
+    safeStorageSet(INTERNAL_RELOAD_KEY, "1");
+    setTimeout(function () {
+      getRootWindow().location.reload();
+    }, typeof delayMs === "number" ? delayMs : MIN_OVERLAY_MS);
   }
 
   function needsResumeReload() {
-    return storage().getItem(BACKGROUNDED_KEY) === "1";
+    return safeStorageGet(BACKGROUNDED_KEY) === "1";
   }
 
   function handleReturnToForeground() {
-    if (window.parent.document.hidden) {
+    const doc = getRootDocument();
+    if (doc.hidden) {
       return;
     }
     if (needsResumeReload()) {
-      verifyThenReload("background_resume");
-      return;
+      requestReload("background_resume", MIN_OVERLAY_MS);
     }
-    checkHealth();
   }
 
   function interceptFirstInteraction(event) {
     if (!needsResumeReload()) {
       return;
     }
-    const overlay = window.parent.document.getElementById(RESUME_OVERLAY_ID);
+    const doc = getRootDocument();
+    const overlay = doc.getElementById(RESUME_OVERLAY_ID);
     if (overlay && overlay.contains(event.target)) {
       return;
     }
     event.preventDefault();
     event.stopImmediatePropagation();
-    verifyThenReload("first_interaction_after_background");
+    requestReload("first_interaction_after_background", MIN_OVERLAY_MS);
   }
 
   try {
-    storage().removeItem(INTERNAL_RELOAD_KEY);
-    if (!window.parent.document.hidden && storage().getItem(BACKGROUNDED_KEY) === "1") {
-      verifyThenReload("initial_visible_with_background_flag");
-    }
-  } catch (error) {
-    // localStorage can be unavailable in rare restrictive browser contexts.
-  }
+    safeStorageRemove(INTERNAL_RELOAD_KEY);
 
-  window.parent.document.addEventListener("visibilitychange", function () {
-    if (window.parent.document.hidden) {
+    const doc = getRootDocument();
+    doc.addEventListener("input", scheduleDraftSave, true);
+    doc.addEventListener("change", scheduleDraftSave, true);
+
+    if (!doc.hidden && needsResumeReload()) {
+      requestReload("initial_visible_with_background_flag", MIN_OVERLAY_MS);
+    }
+
+    doc.addEventListener("visibilitychange", function () {
+      if (doc.hidden) {
+        markBackgrounded();
+      } else {
+        handleReturnToForeground();
+      }
+    });
+
+    getRootWindow().addEventListener("pagehide", function () {
       markBackgrounded();
-    } else {
+    });
+
+    getRootWindow().addEventListener("pageshow", function () {
       handleReturnToForeground();
-    }
-  });
+    });
 
-  window.parent.addEventListener("pagehide", function () {
-    markBackgrounded();
-  });
+    getRootWindow().addEventListener("focus", function () {
+      handleReturnToForeground();
+    });
 
-  window.parent.addEventListener("pageshow", function () {
-    handleReturnToForeground();
-  });
+    doc.addEventListener("pointerdown", interceptFirstInteraction, true);
+    doc.addEventListener("touchstart", interceptFirstInteraction, true);
+    doc.addEventListener("keydown", interceptFirstInteraction, true);
+    doc.addEventListener("focusin", interceptFirstInteraction, true);
 
-  window.parent.addEventListener("focus", function () {
-    handleReturnToForeground();
-  });
+    getRootWindow().addEventListener("offline", function () {
+      if (needsResumeReload()) {
+        showResumeOverlay(
+          "La reprise prendra un instant dès que la connexion sera disponible. Votre brouillon reste conservé.",
+          true
+        );
+      }
+    });
 
-  window.parent.document.addEventListener("pointerdown", interceptFirstInteraction, true);
-  window.parent.document.addEventListener("touchstart", interceptFirstInteraction, true);
-  window.parent.document.addEventListener("keydown", interceptFirstInteraction, true);
-  window.parent.document.addEventListener("focusin", interceptFirstInteraction, true);
-
-  window.parent.addEventListener("online", checkHealth);
-  window.parent.addEventListener("offline", showConnectionOverlay);
-
-  checkHealth();
-  setInterval(checkHealth, 30000);
+    getRootWindow().addEventListener("online", function () {
+      if (needsResumeReload()) {
+        requestReload("online_after_background", MIN_OVERLAY_MS);
+      }
+    });
+  } catch (error) {
+    // Browser storage or parent document access can be restricted in rare contexts.
+  }
 })();
 </script>
-    """.replace("__RELOAD_FLAG_KEY__", RELOAD_FLAG_KEY)
+    """.replace("__RELOAD_FLAG_KEY__", RELOAD_FLAG_KEY).replace("__DRAFT_KEY__", DRAFT_KEY)
     components.html(html, height=0, width=0)
