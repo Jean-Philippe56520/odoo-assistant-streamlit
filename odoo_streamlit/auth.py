@@ -108,12 +108,13 @@ def bootstrap_auth(config: AuthConfig):
     if st.session_state["cookie_bootstrap_done"]:
         return
 
+    # CookieManager is a Streamlit component. On a fresh page load, its value can
+    # arrive one render later. We therefore do one bootstrap render/rerun, like
+    # the original app, but we avoid any second CookieManager call in the same run.
     time.sleep(0.5)
-    restored = restore_auth_from_cookie(config)
+    restore_auth_from_cookie(config)
     st.session_state["cookie_bootstrap_done"] = True
-
-    if not restored and not st.session_state.get("authenticated"):
-        st.rerun()
+    st.rerun()
 
 
 def render_login_form(config: AuthConfig):
@@ -145,8 +146,8 @@ def require_simple_auth():
 
     # Do not call restore_auth_from_cookie() a second time in the same run.
     # CookieManager.get_all() is a Streamlit component and duplicate calls can
-    # raise StreamlitDuplicateElementKey. bootstrap_auth() already restored the
-    # session if a valid cookie exists.
+    # raise StreamlitDuplicateElementKey. bootstrap_auth() performs the single
+    # allowed cookie read, then forces one rerun so the component value is ready.
     if st.session_state.get("authenticated"):
         return
 
