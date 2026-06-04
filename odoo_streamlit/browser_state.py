@@ -182,7 +182,7 @@ def render_connection_watchdog():
   const HEALTH_URL = window.location.origin + "/_stcore/health";
   const HIDDEN_AT_KEY = "abm_odoo_hidden_at_v1";
   const RELOAD_FLAG_KEY = "{RELOAD_FLAG_KEY}";
-  const RESUME_THRESHOLD_MS = 60000;
+  const RESUME_THRESHOLD_MS = 90000;
 
   function ensureConnectionOverlay() {{
     let overlay = window.parent.document.getElementById(CONNECTION_OVERLAY_ID);
