@@ -174,21 +174,25 @@ def restore_draft_to_session_state(draft: dict, seller_names: list[str] | None =
 
 def render_connection_watchdog():
     components.html(
-        """
+        f"""
 <script>
-(function () {
-  const OVERLAY_ID = "abm-connection-overlay";
+(function () {{
+  const CONNECTION_OVERLAY_ID = "abm-connection-overlay";
+  const RESUME_GUARD_ID = "abm-resume-guard-overlay";
   const HEALTH_URL = window.location.origin + "/_stcore/health";
+  const HIDDEN_AT_KEY = "abm_odoo_hidden_at_v1";
+  const RELOAD_FLAG_KEY = "{RELOAD_FLAG_KEY}";
+  const RESUME_THRESHOLD_MS = 60000;
 
-  function ensureOverlay() {
-    let overlay = window.parent.document.getElementById(OVERLAY_ID);
-    if (!overlay) {
+  function ensureConnectionOverlay() {{
+    let overlay = window.parent.document.getElementById(CONNECTION_OVERLAY_ID);
+    if (!overlay) {{
       overlay = window.parent.document.createElement("div");
-      overlay.id = OVERLAY_ID;
+      overlay.id = CONNECTION_OVERLAY_ID;
       overlay.style.cssText = [
         "display:none",
         "position:fixed",
-        "z-index:2147483647",
+        "z-index:2147483646",
         "left:0",
         "right:0",
         "bottom:0",
@@ -201,50 +205,113 @@ def render_connection_watchdog():
       ].join(";");
       overlay.innerHTML = '<strong>Connexion interrompue.</strong><br>L\'application ne répond pas correctement. Vérifiez le réseau ou rechargez avant de continuer.';
       window.parent.document.body.appendChild(overlay);
-    }
+    }}
     return overlay;
-  }
+  }}
 
-  function showOverlay() {
-    ensureOverlay().style.display = "block";
-  }
+  function ensureResumeGuard() {{
+    let overlay = window.parent.document.getElementById(RESUME_GUARD_ID);
+    if (!overlay) {{
+      overlay = window.parent.document.createElement("div");
+      overlay.id = RESUME_GUARD_ID;
+      overlay.style.cssText = [
+        "display:none",
+        "position:fixed",
+        "z-index:2147483647",
+        "inset:0",
+        "background:rgba(2,6,23,0.88)",
+        "color:white",
+        "font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        "padding:22px",
+        "box-sizing:border-box",
+        "align-items:center",
+        "justify-content:center"
+      ].join(";");
+      overlay.innerHTML = `
+        <div style="max-width:520px;width:100%;background:#111827;border:1px solid #374151;border-radius:18px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,.45)">
+          <div style="font-size:22px;font-weight:750;margin-bottom:10px">Application remise au premier plan</div>
+          <div style="font-size:16px;line-height:1.45;color:#d1d5db;margin-bottom:16px">
+            L'application a été laissée en arrière-plan. Pour éviter de saisir dans une session périmée, rechargez avant de continuer.
+            Le brouillon local sera conservé.
+          </div>
+          <button id="abm-resume-reload-button" style="width:100%;border:0;border-radius:12px;background:#ef4444;color:white;font-size:17px;font-weight:700;padding:13px 16px;cursor:pointer">
+            Recharger l'application
+          </button>
+          <div style="font-size:13px;line-height:1.35;color:#9ca3af;margin-top:12px">
+            Si une saisie était commencée, l'application proposera de reprendre le brouillon après rechargement.
+          </div>
+        </div>`;
+      window.parent.document.body.appendChild(overlay);
+      const button = window.parent.document.getElementById("abm-resume-reload-button");
+      if (button) {{
+        button.addEventListener("click", function () {{
+          const payload = JSON.stringify({{requested_at: new Date().toISOString(), reason: "mobile_resume_guard"}});
+          window.parent.localStorage.setItem(RELOAD_FLAG_KEY, payload);
+          window.parent.location.reload();
+        }});
+      }}
+    }}
+    return overlay;
+  }}
 
-  function hideOverlay() {
-    ensureOverlay().style.display = "none";
-  }
+  function showConnectionOverlay() {{
+    ensureConnectionOverlay().style.display = "block";
+  }}
 
-  async function checkHealth() {
+  function hideConnectionOverlay() {{
+    ensureConnectionOverlay().style.display = "none";
+  }}
+
+  function showResumeGuard() {{
+    ensureResumeGuard().style.display = "flex";
+  }}
+
+  async function checkHealth() {{
     const controller = new AbortController();
-    const timer = setTimeout(function () { controller.abort(); }, 4000);
-    try {
-      const response = await fetch(HEALTH_URL, {
+    const timer = setTimeout(function () {{ controller.abort(); }}, 4000);
+    try {{
+      const response = await fetch(HEALTH_URL, {{
         method: "GET",
         cache: "no-store",
         signal: controller.signal
-      });
+      }});
       clearTimeout(timer);
-      if (response.ok) {
-        hideOverlay();
-      } else {
-        showOverlay();
-      }
-    } catch (error) {
+      if (response.ok) {{
+        hideConnectionOverlay();
+      }} else {{
+        showConnectionOverlay();
+      }}
+    }} catch (error) {{
       clearTimeout(timer);
-      showOverlay();
-    }
-  }
+      showConnectionOverlay();
+    }}
+  }}
 
-  window.parent.document.addEventListener("visibilitychange", function () {
-    if (!window.parent.document.hidden) {
-      checkHealth();
-    }
-  });
+  function handleVisibilityChange() {{
+    if (window.parent.document.hidden) {{
+      window.parent.localStorage.setItem(HIDDEN_AT_KEY, String(Date.now()));
+      return;
+    }}
 
+    const hiddenAtRaw = window.parent.localStorage.getItem(HIDDEN_AT_KEY);
+    const hiddenAt = hiddenAtRaw ? Number(hiddenAtRaw) : 0;
+    const elapsed = hiddenAt ? Date.now() - hiddenAt : 0;
+
+    if (elapsed >= RESUME_THRESHOLD_MS) {{
+      showResumeGuard();
+      return;
+    }}
+
+    checkHealth();
+  }}
+
+  window.parent.document.addEventListener("visibilitychange", handleVisibilityChange);
   window.parent.addEventListener("online", checkHealth);
-  window.parent.addEventListener("offline", showOverlay);
+  window.parent.addEventListener("offline", showConnectionOverlay);
+
   checkHealth();
   setInterval(checkHealth, 30000);
-})();
+}})();
 </script>
         """,
         height=0,
