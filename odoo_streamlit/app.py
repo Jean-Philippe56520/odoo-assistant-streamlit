@@ -56,6 +56,7 @@ APP_STATE_KEYS = (
     "draft_prompt_dismissed",
     "session_reset_acknowledged",
     "suppress_draft_prompt",
+    "pending_last_successful_seller_name",
 )
 
 
@@ -110,6 +111,7 @@ def _init_state():
         "draft_prompt_dismissed": False,
         "session_reset_acknowledged": False,
         "suppress_draft_prompt": False,
+        "pending_last_successful_seller_name": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -126,11 +128,18 @@ def _clear_form_widget_state():
     st.session_state["confirm_existing"] = False
     st.session_state["duplicate_action_radio"] = "Mettre à jour le lead existant"
 
-    if "seller_selectbox" in st.session_state:
-        del st.session_state["seller_selectbox"]
+    # Le commercial n'est pas un champ de brouillon prospect : c'est une
+    # préférence de saisie. On ne le vide pas lors d'un reset formulaire.
 
 
 def _apply_pending_resets():
+    pending_seller = str(st.session_state.get("pending_last_successful_seller_name") or "").strip()
+    if pending_seller:
+        save_last_seller_name(pending_seller, component_key="save_last_successful_seller_name")
+        st.session_state["seller_name"] = pending_seller
+        st.session_state["seller_selectbox"] = pending_seller
+        st.session_state["pending_last_successful_seller_name"] = None
+
     if st.session_state.get("pending_local_draft_clear"):
         clear_local_draft(component_key="pending_clear_local_draft")
         st.session_state["suppress_draft_prompt"] = True
@@ -143,8 +152,9 @@ def _apply_pending_resets():
         st.session_state["preview_vals"] = None
         st.session_state["existing_id"] = None
         st.session_state["existing_data"] = None
-        st.session_state["seller_name"] = None
-        st.session_state["seller_user_id"] = None
+        # Ne pas remettre le commercial à zéro : il reste la préférence
+        # courante de saisie, et la persistance durable est mise à jour
+        # uniquement après une piste Odoo créée/mise à jour avec succès.
         st.session_state["draft_restored"] = False
         st.session_state["draft_prompt_dismissed"] = False
 
@@ -167,7 +177,11 @@ def request_preview_reset():
     st.session_state["pending_preview_reset"] = True
 
 
-def request_full_reset(clear_banner=False, clear_local_draft_after_rerun=False):
+def request_full_reset(clear_banner=False, clear_local_draft_after_rerun=False, successful_seller_name=None):
+    if successful_seller_name:
+        st.session_state["pending_last_successful_seller_name"] = str(successful_seller_name).strip()
+        st.session_state["seller_name"] = str(successful_seller_name).strip()
+        st.session_state["seller_selectbox"] = str(successful_seller_name).strip()
     if clear_banner:
         st.session_state["result_banner"] = None
     if clear_local_draft_after_rerun:
@@ -482,7 +496,6 @@ seller_name = st.selectbox(
 )
 st.session_state["seller_name"] = seller_name
 st.session_state["seller_user_id"] = seller_options[seller_name]
-save_last_seller_name(seller_name, component_key="save_current_seller_name")
 
 st.subheader("Contact")
 st.text_input("Nom de l'entreprise *", key="partner_name", on_change=handle_form_change)
@@ -579,7 +592,11 @@ if preview_data and preview_vals:
                             "message": f"Mise à jour envoyée, mais confirmation Odoo incomplète. {result.message}",
                         }
 
-                    request_full_reset(clear_banner=False, clear_local_draft_after_rerun=result.success)
+                    request_full_reset(
+                        clear_banner=False,
+                        clear_local_draft_after_rerun=result.success,
+                        successful_seller_name=st.session_state.get("seller_name") if result.success else None,
+                    )
                     st.rerun()
 
                 elif action == "Créer un nouveau lead quand même":
@@ -609,7 +626,11 @@ if preview_data and preview_vals:
                             "message": f"Création envoyée, mais confirmation Odoo incomplète. {result.message}",
                         }
 
-                    request_full_reset(clear_banner=False, clear_local_draft_after_rerun=result.success)
+                    request_full_reset(
+                        clear_banner=False,
+                        clear_local_draft_after_rerun=result.success,
+                        successful_seller_name=st.session_state.get("seller_name") if result.success else None,
+                    )
                     st.rerun()
 
                 else:
@@ -656,7 +677,11 @@ if preview_data and preview_vals:
                         "message": f"La création a été lancée, mais la confirmation Odoo n'a pas pu être relue. {result.message}",
                     }
 
-                request_full_reset(clear_banner=False, clear_local_draft_after_rerun=result.success)
+                request_full_reset(
+                    clear_banner=False,
+                    clear_local_draft_after_rerun=result.success,
+                    successful_seller_name=st.session_state.get("seller_name") if result.success else None,
+                )
                 st.rerun()
 
         with col2:

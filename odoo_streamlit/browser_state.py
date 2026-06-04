@@ -481,10 +481,10 @@ def render_connection_watchdog():
   }
 
   function saveLastSellerFromDom() {
-    const seller = findSellerValueFromDom();
-    if (seller) {
-      localSet(LAST_SELLER_KEY, seller);
-    }
+    // Intentionally empty. The durable default commercial is updated only
+    // after a successful Odoo creation/update, from Streamlit, not whenever
+    // the selectbox changes. This prevents accidental overwrite by "A imputer"
+    // on app startup or by a temporary selection.
   }
 
   function collectDraftFromDom() {
@@ -501,7 +501,6 @@ def render_connection_watchdog():
     const seller = findSellerValueFromDom();
     if (seller) {
       draft.seller_name = seller;
-      localSet(LAST_SELLER_KEY, seller);
     }
     draft.saved_at = new Date().toISOString();
     draft.source = "browser_dom";
@@ -612,7 +611,6 @@ def render_connection_watchdog():
 
     doc.addEventListener("input", scheduleDraftSave, true);
     doc.addEventListener("change", function () {
-      saveLastSellerFromDom();
       scheduleDraftSave();
     }, true);
 
