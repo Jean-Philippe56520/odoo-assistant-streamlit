@@ -10,6 +10,7 @@ from .odoo_client import execute_kw, find_or_create_tag, lead_exists
 
 
 PROSPECTION_TAG = "Prospection"
+LEAD_PRIORITY_VALUES = ("0", "1", "2", "3")
 
 DEFAULT_ACTIVITY_TYPE = "To-Do"
 DEFAULT_ACTIVITY_SUMMARY = "Relance commerciale"
@@ -66,6 +67,13 @@ class LeadActionResult:
 
 def normalize_text(value):
     return str(value or "").strip()
+
+
+def normalize_lead_priority(value):
+    if value is None:
+        return None
+    priority = str(value).strip()
+    return priority if priority in LEAD_PRIORITY_VALUES else None
 
 
 def normalize_email(value):
@@ -247,7 +255,14 @@ def add_audit_trail(vals, actor_user=None, seller_name=None, mode=None):
     return vals
 
 
-def build_vals_from_answers(data, team_id, seller_user_id, replace_tags=True, existing_description=None):
+def build_vals_from_answers(
+    data,
+    team_id,
+    seller_user_id,
+    replace_tags=True,
+    existing_description=None,
+    priority=None,
+):
     uid = data.get("_uid")
 
     vals = {
@@ -272,6 +287,12 @@ def build_vals_from_answers(data, team_id, seller_user_id, replace_tags=True, ex
 
     if team_id:
         vals["team_id"] = team_id
+
+    if priority is not None:
+        normalized_priority = normalize_lead_priority(priority)
+        if normalized_priority is None:
+            raise ValueError(f"Priorité Odoo invalide : {priority!r}")
+        vals["priority"] = normalized_priority
 
     if replace_tags:
         description = build_description_for_create(data)
@@ -465,6 +486,7 @@ def read_lead_summary(models, uid, lead_id):
                     "phone",
                     "mobile",
                     "user_id",
+                    "priority",
                     "description",
                 ]
             },
