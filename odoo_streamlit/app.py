@@ -8,20 +8,20 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
-from odoo_import.config import LEAD_MODEL
 from odoo_import.lead_service import (
+    LEAD_PRIORITY_VALUES,
     PROSPECTION_TAG,
     add_audit_trail,
     build_title,
     build_vals_from_answers,
     create_new_lead,
+    normalize_lead_priority,
     prepare_lead_preview,
     update_existing_lead,
     validate_lead_data,
 )
 from odoo_import.odoo_client import (
     create_activity_for_lead,
-    execute_kw,
     find_team_ventes,
     get_active_sales_users,
     odoo_connect,
@@ -59,12 +59,12 @@ from datetime import date, timedelta
 
 st.set_page_config(page_title="Saisie prospection Odoo V2", layout="centered")
 
-LEAD_PRIORITY_VALUES = ("0", "1", "2", "3")
+PRIORITY_KEEP_EXISTING = "__keep_existing__"
 LEAD_PRIORITY_LABELS = {
-    "0": "0 étoile",
-    "1": "1 ★",
-    "2": "2 ★★",
-    "3": "3 ★★★",
+    "0": "Aucune",
+    "1": "★",
+    "2": "★★",
+    "3": "★★★",
 }
 
 APP_STATE_KEYS = (
@@ -76,6 +76,7 @@ APP_STATE_KEYS = (
     "seller_name",
     "seller_user_id",
     "lead_priority",
+    "lead_priority_context",
     "result_banner",
     "pending_form_reset",
     "pending_preview_reset",
@@ -138,6 +139,7 @@ def _init_state():
         "seller_name": None,
         "seller_user_id": None,
         "lead_priority": "0",
+        "lead_priority_context": None,
         "result_banner": None,
         "pending_form_reset": False,
         "pending_preview_reset": False,
@@ -163,6 +165,7 @@ def _clear_form_widget_state():
         st.session_state[key] = defaults.get(key, "")
 
     st.session_state["lead_priority"] = "0"
+    st.session_state["lead_priority_context"] = None
     st.session_state["confirm_existing"] = False
     st.session_state["duplicate_action_radio"] = "Mettre à jour le lead existant"
 
@@ -211,6 +214,7 @@ def _apply_pending_resets():
         st.session_state["existing_id"] = None
         st.session_state["existing_data"] = None
         st.session_state["lead_priority"] = "0"
+        st.session_state["lead_priority_context"] = None
         st.session_state["confirm_existing"] = False
         st.session_state["duplicate_action_radio"] = "Mettre à jour le lead existant"
         st.session_state["pending_preview_reset"] = False
@@ -243,33 +247,15 @@ def validate_form(raw_data):
     return result.errors, result.cleaned_data
 
 
-def normalize_lead_priority(value):
-    priority = str(value or "0").strip()
-    return priority if priority in LEAD_PRIORITY_VALUES else "0"
-
-
 def format_lead_priority(value):
-    return LEAD_PRIORITY_LABELS[normalize_lead_priority(value)]
+    priority = normalize_lead_priority(value)
+    return LEAD_PRIORITY_LABELS.get(priority, "Non disponible")
 
 
-def read_existing_lead_priority(uid, lead_id):
-    if not lead_id:
-        return "0"
-
-    try:
-        rows = execute_kw(
-            uid,
-            LEAD_MODEL,
-            "read",
-            args=[[lead_id]],
-            kwargs={"fields": ["priority"]},
-        )
-        if rows:
-            return normalize_lead_priority(rows[0].get("priority"))
-    except Exception:
-        pass
-
-    return "0"
+def format_priority_option(value):
+    if value == PRIORITY_KEEP_EXISTING:
+        return "Conserver la priorité actuelle"
+    return format_lead_priority(value)
 
 
 def compute_preview(data, seller_name, seller_user_id):
@@ -288,17 +274,13 @@ def compute_preview(data, seller_name, seller_user_id):
 
     existing_id = preview.existing_match.lead_id if preview.existing_match else None
     existing_data = preview.existing_match.summary if preview.existing_match else None
-    priority = read_existing_lead_priority(uid, existing_id) if existing_id else "0"
-
-    if existing_data is not None:
-        existing_data = dict(existing_data)
-        existing_data["priority"] = priority
 
     st.session_state["preview_data"] = preview.cleaned_data
     st.session_state["preview_vals"] = preview.vals
     st.session_state["existing_id"] = existing_id
     st.session_state["existing_data"] = existing_data
-    st.session_state["lead_priority"] = priority
+    st.session_state["lead_priority"] = "0"
+    st.session_state["lead_priority_context"] = None
     st.session_state["seller_name"] = seller_name
     st.session_state["seller_user_id"] = seller_user_id
 
@@ -352,21 +334,33 @@ def show_preview(preview_vals, raw_data, seller_name):
     st.write(f"**Étiquette :** {PROSPECTION_TAG}")
 
 
-def render_priority_selector():
-    current_priority = normalize_lead_priority(st.session_state.get("lead_priority"))
-    if st.session_state.get("lead_priority") != current_priority:
-        st.session_state["lead_priority"] = current_priority
+def render_priority_selector(context, initial_priority="0", allow_keep_existing=False):
+    options = LEAD_PRIORITY_VALUES
+    if allow_keep_existing:
+        options = (PRIORITY_KEEP_EXISTING, *LEAD_PRIORITY_VALUES)
 
-    st.subheader("Priorité Odoo")
+    if initial_priority not in options:
+        initial_priority = options[0]
+
+    if st.session_state.get("lead_priority_context") != context:
+        st.session_state["lead_priority_context"] = context
+        st.session_state["lead_priority"] = initial_priority
+    elif st.session_state.get("lead_priority") not in options:
+        st.session_state["lead_priority"] = initial_priority
+
+    st.subheader("Priorité de la piste")
     selected = st.radio(
-        "Nombre d'étoiles",
-        LEAD_PRIORITY_VALUES,
-        format_func=format_lead_priority,
+        "Priorité",
+        options,
+        format_func=format_priority_option,
         horizontal=True,
         key="lead_priority",
         help="Cette valeur est envoyée dans le champ standard Priorité de la piste Odoo.",
     )
-    st.caption("0 = faible · 1 = moyenne · 2 = élevée · 3 = très élevée")
+    st.caption("Aucune = faible · ★ = moyenne · ★★ = élevée · ★★★ = très élevée")
+
+    if selected == PRIORITY_KEEP_EXISTING:
+        return None
     return normalize_lead_priority(selected)
 
 
@@ -465,6 +459,10 @@ def handle_seller_change():
     sync_form_data_from_widgets()
     request_preview_reset()
 
+
+def handle_duplicate_action_change():
+    st.session_state["confirm_existing"] = False
+    st.session_state["lead_priority_context"] = None
 
 
 def _coerce_date(value, default=None):
@@ -852,7 +850,6 @@ existing_data = st.session_state["existing_data"]
 if preview_data and preview_vals:
     st.divider()
     show_preview(preview_vals, preview_data, st.session_state["seller_name"])
-    selected_priority = render_priority_selector()
 
     if existing_id:
         st.warning(f"Un lead similaire existe déjà (ID {existing_id}).")
@@ -867,7 +864,33 @@ if preview_data and preview_vals:
                 "Annuler",
             ),
             key="duplicate_action_radio",
+            on_change=handle_duplicate_action_change,
         )
+
+        selected_priority = None
+        if action == "Mettre à jour le lead existant":
+            existing_priority = normalize_lead_priority(existing_data.get("priority")) if existing_data else None
+            if existing_priority is None:
+                st.warning(
+                    "La priorité actuelle n'a pas pu être lue dans Odoo. "
+                    "Par sécurité, conservez-la ou choisissez explicitement une nouvelle priorité."
+                )
+                selected_priority = render_priority_selector(
+                    context="update_existing_unknown_priority",
+                    initial_priority=PRIORITY_KEEP_EXISTING,
+                    allow_keep_existing=True,
+                )
+            else:
+                selected_priority = render_priority_selector(
+                    context="update_existing",
+                    initial_priority=existing_priority,
+                )
+        elif action == "Créer un nouveau lead quand même":
+            selected_priority = render_priority_selector(
+                context="create_duplicate",
+                initial_priority="0",
+            )
+
         confirm = st.checkbox("Je confirme cette action", key="confirm_existing")
 
         col1, col2 = st.columns(2)
@@ -882,8 +905,8 @@ if preview_data and preview_vals:
                         st.session_state["seller_user_id"],
                         replace_tags=False,
                         existing_description=existing_data.get("description") if existing_data else None,
+                        priority=selected_priority,
                     )
-                    vals["priority"] = selected_priority
                     vals = add_audit_trail(
                         vals,
                         actor_user=st.session_state.get("auth_user", ""),
@@ -914,8 +937,8 @@ if preview_data and preview_vals:
                         st.session_state["seller_user_id"],
                         replace_tags=True,
                         existing_description=None,
+                        priority=selected_priority,
                     )
-                    vals["priority"] = selected_priority
                     vals = add_audit_trail(
                         vals,
                         actor_user=st.session_state.get("auth_user", ""),
@@ -953,6 +976,10 @@ if preview_data and preview_vals:
                 st.rerun()
 
     else:
+        selected_priority = render_priority_selector(
+            context="create_new",
+            initial_priority="0",
+        )
         col1, col2 = st.columns(2)
 
         with col1:
@@ -963,8 +990,8 @@ if preview_data and preview_vals:
                     st.session_state["seller_user_id"],
                     replace_tags=True,
                     existing_description=None,
+                    priority=selected_priority,
                 )
-                vals["priority"] = selected_priority
                 vals = add_audit_trail(
                     vals,
                     actor_user=st.session_state.get("auth_user", ""),
