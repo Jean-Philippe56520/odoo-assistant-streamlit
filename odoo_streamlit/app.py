@@ -8,6 +8,7 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
+from odoo_import.duplicate_service import find_lead_candidates
 from odoo_import.lead_service import (
     LEAD_PRIORITY_VALUES,
     PROSPECTION_TAG,
@@ -16,7 +17,6 @@ from odoo_import.lead_service import (
     build_vals_from_answers,
     create_new_lead,
     normalize_lead_priority,
-    prepare_lead_preview,
     update_existing_lead,
     validate_lead_data,
 )
@@ -65,6 +65,11 @@ LEAD_PRIORITY_LABELS = {
     "1": "★",
     "2": "★★",
     "3": "★★★",
+}
+DUPLICATE_REASON_LABELS = {
+    "email": "même email",
+    "phone": "même téléphone/mobile",
+    "company_city": "même entreprise et même ville",
 }
 
 APP_STATE_KEYS = (
@@ -258,27 +263,46 @@ def format_priority_option(value):
     return format_lead_priority(value)
 
 
+def _serialize_duplicate_candidate(candidate):
+    return {
+        "lead_id": candidate.lead_id,
+        "summary": dict(candidate.summary or {}),
+        "match_level": candidate.match_level,
+        "reasons": list(candidate.reasons),
+    }
+
+
 def compute_preview(data, seller_name, seller_user_id):
     uid, models = get_odoo()
+    work_data = dict(data)
+    work_data["_uid"] = uid
+    work_data["_actor_user"] = st.session_state.get("auth_user", "")
 
-    preview = prepare_lead_preview(
-        uid=uid,
-        models=models,
-        raw_data=data,
-        team_id=get_team_id(),
-        seller_user_id=seller_user_id,
-        seller_name=seller_name,
-        actor_user=st.session_state.get("auth_user", ""),
-        audit_mode="prévisualisation",
+    candidates = find_lead_candidates(uid, work_data)
+    serialized_candidates = [_serialize_duplicate_candidate(candidate) for candidate in candidates]
+
+    vals = build_vals_from_answers(
+        work_data,
+        get_team_id(),
+        seller_user_id,
+        replace_tags=True,
+        existing_description=None,
     )
+    vals = add_audit_trail(
+        vals,
+        actor_user=st.session_state.get("auth_user", ""),
+        seller_name=seller_name,
+        mode="prévisualisation",
+    )
+    # Cette clé reste uniquement dans la prévisualisation Streamlit. Les valeurs
+    # finales Odoo sont reconstruites au clic de validation.
+    vals["_duplicate_candidates"] = serialized_candidates
 
-    existing_id = preview.existing_match.lead_id if preview.existing_match else None
-    existing_data = preview.existing_match.summary if preview.existing_match else None
-
-    st.session_state["preview_data"] = preview.cleaned_data
-    st.session_state["preview_vals"] = preview.vals
-    st.session_state["existing_id"] = existing_id
-    st.session_state["existing_data"] = existing_data
+    first_candidate = serialized_candidates[0] if serialized_candidates else None
+    st.session_state["preview_data"] = work_data
+    st.session_state["preview_vals"] = vals
+    st.session_state["existing_id"] = first_candidate.get("lead_id") if first_candidate else None
+    st.session_state["existing_data"] = first_candidate.get("summary") if first_candidate else None
     st.session_state["lead_priority"] = "0"
     st.session_state["lead_priority_context"] = None
     st.session_state["seller_name"] = seller_name
@@ -286,9 +310,9 @@ def compute_preview(data, seller_name, seller_user_id):
 
 
 def show_existing(existing):
-    st.markdown("### Lead détecté")
+    st.markdown("### Piste Odoo sélectionnée")
     if not existing:
-        st.warning("Impossible de lire le détail du lead détecté.")
+        st.warning("Impossible de lire le détail de la piste détectée.")
         return
 
     seller = "-"
@@ -302,8 +326,39 @@ def show_existing(existing):
     st.write(f"**Email :** {existing.get('email_from') or '-'}")
     st.write(f"**Téléphone :** {existing.get('phone') or '-'}")
     st.write(f"**Mobile :** {existing.get('mobile') or '-'}")
+    st.write(f"**Ville :** {existing.get('city') or '-'}")
     st.write(f"**Vendeur actuel :** {seller}")
     st.write(f"**Priorité actuelle :** {format_lead_priority(existing.get('priority'))}")
+
+
+def _duplicate_reason_text(candidate):
+    reasons = [DUPLICATE_REASON_LABELS.get(reason, reason) for reason in candidate.get("reasons", [])]
+    return ", ".join(reasons) if reasons else "correspondance détectée"
+
+
+def _duplicate_candidate_label(candidate):
+    summary = candidate.get("summary") or {}
+    company = summary.get("partner_name") or summary.get("name") or f"Lead {candidate.get('lead_id')}"
+    city = summary.get("city") or "ville non renseignée"
+    level = "Doublon probable" if candidate.get("match_level") == "strong" else "Société similaire"
+    return f"{level} · {company} · {city} · {_duplicate_reason_text(candidate)}"
+
+
+def select_duplicate_candidate(candidates):
+    ids = [candidate.get("lead_id") for candidate in candidates if candidate.get("lead_id")]
+    candidate_by_id = {candidate.get("lead_id"): candidate for candidate in candidates if candidate.get("lead_id")}
+    if not ids:
+        return None
+
+    widget_key = "duplicate_candidate_" + "_".join(str(lead_id) for lead_id in ids)
+    selected_id = st.radio(
+        "Piste Odoo à examiner",
+        ids,
+        format_func=lambda lead_id: _duplicate_candidate_label(candidate_by_id[lead_id]),
+        key=widget_key,
+        on_change=handle_duplicate_action_change,
+    )
+    return candidate_by_id.get(selected_id)
 
 
 def show_preview(preview_vals, raw_data, seller_name):
@@ -651,6 +706,7 @@ def render_session_reset_block(snapshot, seller_names):
 
     st.stop()
 
+
 def render_draft_prompt(draft, seller_names):
     # Après une création/mise à jour Odoo confirmée, le bandeau vert avec l'ID
     # fait foi. Le brouillon local est en cours de suppression côté navigateur :
@@ -851,10 +907,38 @@ if preview_data and preview_vals:
     st.divider()
     show_preview(preview_vals, preview_data, st.session_state["seller_name"])
 
-    if existing_id:
-        st.warning(f"Un lead similaire existe déjà (ID {existing_id}).")
-        st.caption("Le système signale une similarité. Vous décidez ensuite de mettre à jour, créer quand même, ou annuler.")
-        show_existing(existing_data)
+    duplicate_candidates = preview_vals.get("_duplicate_candidates") or []
+    if duplicate_candidates:
+        strong_count = sum(1 for candidate in duplicate_candidates if candidate.get("match_level") == "strong")
+        secondary_count = len(duplicate_candidates) - strong_count
+
+        if strong_count:
+            st.warning(
+                f"{strong_count} doublon(s) probable(s) détecté(s). "
+                "Vérifiez la piste avant de décider de la mettre à jour."
+            )
+        elif secondary_count:
+            st.info(
+                "Une société similaire existe dans Odoo : même nom d'entreprise normalisé et même ville. "
+                "Il s'agit d'une vérification, pas d'un doublon certain."
+            )
+
+        if len(duplicate_candidates) > 1:
+            st.caption(f"{len(duplicate_candidates)} correspondances maximum sont proposées. Sélectionnez celle à examiner.")
+
+        selected_candidate = select_duplicate_candidate(duplicate_candidates)
+        if selected_candidate:
+            existing_id = selected_candidate.get("lead_id")
+            existing_data = selected_candidate.get("summary") or {}
+            st.session_state["existing_id"] = existing_id
+            st.session_state["existing_data"] = existing_data
+
+            if selected_candidate.get("match_level") == "strong":
+                st.warning(f"Doublon probable : {_duplicate_reason_text(selected_candidate)}.")
+            else:
+                st.info(f"Société similaire à vérifier : {_duplicate_reason_text(selected_candidate)}.")
+
+            show_existing(existing_data)
 
         action = st.radio(
             "Choisissez une action",
@@ -876,13 +960,13 @@ if preview_data and preview_vals:
                     "Par sécurité, conservez-la ou choisissez explicitement une nouvelle priorité."
                 )
                 selected_priority = render_priority_selector(
-                    context="update_existing_unknown_priority",
+                    context=f"update_existing_unknown_priority:{existing_id}",
                     initial_priority=PRIORITY_KEEP_EXISTING,
                     allow_keep_existing=True,
                 )
             else:
                 selected_priority = render_priority_selector(
-                    context="update_existing",
+                    context=f"update_existing:{existing_id}",
                     initial_priority=existing_priority,
                 )
         elif action == "Créer un nouveau lead quand même":
