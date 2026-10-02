@@ -39,6 +39,7 @@ from odoo_streamlit.browser_state import (
     save_last_seller_name,
     save_local_draft,
 )
+from odoo_streamlit.campaigns import ACTIVE_TEMPORARY_CAMPAIGN, resolve_lead_tag
 from odoo_streamlit.constants import (
     ACTIVITY_CUSTOM_DATE_LABEL,
     ACTIVITY_DATE_LABEL,
@@ -92,6 +93,7 @@ APP_STATE_KEYS = (
     "session_reset_acknowledged",
     "suppress_draft_prompt",
     "pending_last_successful_seller_name",
+    "campaign_active",
 )
 
 
@@ -155,6 +157,7 @@ def _init_state():
         "suppress_draft_prompt": False,
         "pending_last_successful_seller_name": None,
         "seller_manually_changed": False,
+        "campaign_active": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -252,6 +255,64 @@ def validate_form(raw_data):
     return result.errors, result.cleaned_data
 
 
+def is_campaign_mode_active():
+    campaign = ACTIVE_TEMPORARY_CAMPAIGN
+    if not campaign.is_available():
+        st.session_state["campaign_active"] = False
+        return False
+    return bool(st.session_state.get("campaign_active", False))
+
+
+def get_active_lead_tag():
+    return resolve_lead_tag(is_campaign_mode_active())
+
+
+def render_campaign_mode():
+    campaign = ACTIVE_TEMPORARY_CAMPAIGN
+
+    if not campaign.is_available():
+        st.session_state["campaign_active"] = False
+        return
+
+    if is_campaign_mode_active():
+        st.warning(
+            (
+                f"MODE SALON BCT ACTIF — {campaign.title}. "
+                f"Toutes les pistes saisies dans ce mode reçoivent automatiquement "
+                f"l'étiquette Odoo « {campaign.odoo_tag} »."
+            )
+        )
+        st.caption(
+            "Ce mode reste actif après chaque création pour permettre d'enchaîner les contacts du salon."
+        )
+        if st.button(
+            "Revenir à la prospection normale",
+            key="disable_campaign_mode",
+            use_container_width=True,
+        ):
+            st.session_state["campaign_active"] = False
+            request_preview_reset()
+            st.rerun()
+        return
+
+    st.info(
+        (
+            f"{campaign.title} — fonction temporaire. "
+            f"Réservé aux contacts rencontrés au salon des {campaign.event_dates_label}. "
+            "Si vous n'êtes pas concerné, n'activez pas ce mode et utilisez le formulaire normalement."
+        )
+    )
+    if st.button(
+        campaign.button_label,
+        type="primary",
+        key="enable_campaign_mode",
+        use_container_width=True,
+    ):
+        st.session_state["campaign_active"] = True
+        request_preview_reset()
+        st.rerun()
+
+
 def format_lead_priority(value):
     priority = normalize_lead_priority(value)
     return LEAD_PRIORITY_LABELS.get(priority, "Non disponible")
@@ -277,6 +338,7 @@ def compute_preview(data, seller_name, seller_user_id):
     work_data = dict(data)
     work_data["_uid"] = uid
     work_data["_actor_user"] = st.session_state.get("auth_user", "")
+    work_data["_lead_tag"] = get_active_lead_tag()
 
     candidates = find_lead_candidates(uid, work_data)
     serialized_candidates = [_serialize_duplicate_candidate(candidate) for candidate in candidates]
@@ -287,6 +349,7 @@ def compute_preview(data, seller_name, seller_user_id):
         seller_user_id,
         replace_tags=True,
         existing_description=None,
+        tag_name=work_data["_lead_tag"],
     )
     vals = add_audit_trail(
         vals,
@@ -386,7 +449,7 @@ def show_preview(preview_vals, raw_data, seller_name):
     if preview_vals.get("description"):
         with st.expander("Notes générées pour Odoo", expanded=False):
             st.text(preview_vals["description"])
-    st.write(f"**Étiquette :** {PROSPECTION_TAG}")
+    st.write(f"**Étiquette :** {raw_data.get('_lead_tag') or PROSPECTION_TAG}")
 
 
 def render_priority_selector(context, initial_priority="0", allow_keep_existing=False):
@@ -786,6 +849,7 @@ st.title("Saisie prospection Odoo V2")
 st.caption("Version web sécurisée par identifiant partagé, avec contrôle des leads similaires et confirmation finale.")
 
 display_banner()
+render_campaign_mode()
 
 try:
     uid, models = get_odoo()
@@ -882,7 +946,8 @@ current_draft = build_draft_from_session(seller_name=seller_name)
 if not has_confirmed_odoo_success_banner() and not st.session_state.get("pending_local_draft_clear"):
     save_local_draft(current_draft, component_key="save_current_form_draft")
 
-submitted = st.button("Prévisualiser", type="primary", key="preview_button")
+preview_button_label = "Prévisualiser la piste Salon BCT" if is_campaign_mode_active() else "Prévisualiser"
+submitted = st.button(preview_button_label, type="primary", key="preview_button")
 
 if submitted:
     st.session_state["result_banner"] = None
@@ -990,6 +1055,7 @@ if preview_data and preview_vals:
                         replace_tags=False,
                         existing_description=existing_data.get("description") if existing_data else None,
                         priority=selected_priority,
+                        tag_name=preview_data.get("_lead_tag") or PROSPECTION_TAG,
                     )
                     vals = add_audit_trail(
                         vals,
@@ -1022,6 +1088,7 @@ if preview_data and preview_vals:
                         replace_tags=True,
                         existing_description=None,
                         priority=selected_priority,
+                        tag_name=preview_data.get("_lead_tag") or PROSPECTION_TAG,
                     )
                     vals = add_audit_trail(
                         vals,
@@ -1067,7 +1134,12 @@ if preview_data and preview_vals:
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("Créer la piste", type="primary", key="create_new_lead"):
+            create_button_label = (
+                "Créer la piste Salon BCT"
+                if preview_data.get("_lead_tag") == ACTIVE_TEMPORARY_CAMPAIGN.odoo_tag
+                else "Créer la piste"
+            )
+            if st.button(create_button_label, type="primary", key="create_new_lead"):
                 vals = build_vals_from_answers(
                     preview_data,
                     team_id,
@@ -1075,6 +1147,7 @@ if preview_data and preview_vals:
                     replace_tags=True,
                     existing_description=None,
                     priority=selected_priority,
+                    tag_name=preview_data.get("_lead_tag") or PROSPECTION_TAG,
                 )
                 vals = add_audit_trail(
                     vals,
