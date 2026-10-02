@@ -9,7 +9,7 @@ from odoo_streamlit.campaigns import (
 
 def test_campaign_uses_jeremie_label_during_visibility_window():
     assert resolve_lead_tag(True, date(2026, 10, 11)) == (
-        "Salon BCT, boucherie, charcuterie, traiteur 2026"
+        "Salon de la Boucherie Angers 2026"
     )
 
 
@@ -38,7 +38,7 @@ def test_build_vals_uses_campaign_tag_for_new_lead(monkeypatch):
 
     assert captured == {
         "uid": 7,
-        "tag_name": "Salon BCT, boucherie, charcuterie, traiteur 2026",
+        "tag_name": "Salon de la Boucherie Angers 2026",
     }
     assert vals["tag_ids"] == [(6, 0, [123])]
 
