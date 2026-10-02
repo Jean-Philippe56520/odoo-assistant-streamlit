@@ -262,6 +262,7 @@ def build_vals_from_answers(
     replace_tags=True,
     existing_description=None,
     priority=None,
+    tag_name=None,
 ):
     uid = data.get("_uid")
 
@@ -303,7 +304,8 @@ def build_vals_from_answers(
         vals["description"] = description
 
     if uid is not None:
-        tag_id = find_or_create_tag(None, uid, PROSPECTION_TAG)
+        selected_tag = normalize_text(tag_name) or PROSPECTION_TAG
+        tag_id = find_or_create_tag(None, uid, selected_tag)
         vals["tag_ids"] = [(6, 0, [tag_id])] if replace_tags else [(4, tag_id)]
 
     activity_vals = build_activity_vals_from_answers(
