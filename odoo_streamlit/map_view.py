@@ -13,7 +13,11 @@ MAP_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{10,128}$")
 
 def get_map_id():
     """Lire un identifiant My Maps de la configuration privée de l'application."""
-    raw_id = st.secrets.get(MAP_SECRET_KEY, "") or os.environ.get(MAP_SECRET_KEY, "")
+    try:
+        configured_id = st.secrets.get(MAP_SECRET_KEY, "")
+    except (FileNotFoundError, RuntimeError):
+        configured_id = ""
+    raw_id = configured_id or os.environ.get(MAP_SECRET_KEY, "")
     map_id = str(raw_id).strip()
     return map_id if MAP_ID_PATTERN.fullmatch(map_id) else None
 
