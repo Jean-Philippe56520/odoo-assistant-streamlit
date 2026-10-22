@@ -89,14 +89,10 @@ Un watchdog navigateur vérifie périodiquement l'endpoint Streamlit `/_stcore/h
 - Un identifiant différent peut être configuré dans le secret Streamlit `ABM_MYMAPS_ID`. Le code de présentation et l'identifiant pilote doivent être retirés du dépôt après la présentation ; il ne s'agit pas d'une protection des données Google My Maps, qui restent accessibles à toute personne possédant le lien de partage.
 - Le formulaire de prospection demeure sur la page principale. Le changement de page est une opération Streamlit : **enregistrer ou terminer une saisie en cours** avant d'ouvrir la carte pour éviter toute perte des champs de formulaire non persistés.
 
-### Affichage mobile My Maps
+### Carte My Maps intégrée : fonctionnement simple
 
-Sur certains mobiles, Google My Maps masque la recherche et les commandes des calques dans l'affichage intégré. Le bouton placé **au-dessus** de la carte ouvre la visionneuse Google My Maps complète dans un nouvel onglet pour retrouver les commandes disponibles. La carte intégrée demeure dans Streamlit, sans changement des données ou des calques Google.
+La page **Carte commerciale** conserve la connexion ABM et le mot de passe de présentation temporaire `Test`. Elle affiche directement la carte Google My Maps originale (mêmes points, pictogrammes, couleurs et calques, sous réserve des commandes proposées par Google dans l'intégration).
 
-### Carte ABM responsive intégrée
+Un seul bouton, placé au-dessus de la carte, permet d'ouvrir **My Maps complet** dans un nouvel onglet. Cette ouverture donne accès aux commandes natives de recherche d'adresses et de codes postaux, ainsi qu'au panneau des calques. Sur mobile, Google peut masquer une partie des commandes de son iframe : l'outil ABM ne peut ni imposer ni reproduire la loupe native au sein de cette iframe.
 
-L'interface mobile et ordinateur n'utilise plus seulement le miroir My Maps : elle charge les objets de l'export KML dans une carte interactive intégrée à Streamlit. La recherche se trouve au-dessus de la carte ; le bouton **Calques** ouvre un panneau tactile sur mobile et un panneau latéral sur ordinateur. Les calques peuvent être affichés ou masqués individuellement, ou ensemble. La sélection d'un résultat de recherche centre la carte sur l'objet recherché.
-
-L'export KML est récupéré côté serveur avec une mise en cache de 15 minutes ; les données ne sont pas commitées dans GitHub. Une connexion Internet est nécessaire pour charger le fond OpenStreetMap et Leaflet. Si l'export KML échoue, l'ancienne intégration My Maps reste disponible en secours. L'autorisation Google du lien n'est pas renforcée par le mot de passe de présentation.
-
-La vue restitue les calques, points, tracés et couleurs KML ; elle n'est **pas** une reproduction parfaite de tous les boutons, icônes et fonctions de l'éditeur My Maps. La recherche porte sur les noms et descriptions de la carte, pas sur toutes les adresses de Google.
+La recherche géographique personnalisée, la carte Leaflet et les exports KML reconstruits ont été retirés. Cette page ne lit ni ne modifie les données Odoo. Le partage Google reste indépendant du mot de passe `Test`.
