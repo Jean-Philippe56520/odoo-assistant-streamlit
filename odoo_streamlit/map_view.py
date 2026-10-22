@@ -32,7 +32,27 @@ def build_map_urls(map_id):
     )
 
 
+def require_temporary_map_password():
+    """Verrou temporaire pour la présentation du pôle business."""
+    if st.session_state.get("abm_map_unlocked"):
+        return
+
+    st.subheader("Accès de présentation")
+    st.info("Cette carte est réservée à la préparation de la présentation du pôle business.")
+    with st.form("abm_map_password_form"):
+        password = st.text_input("Mot de passe temporaire", type="password")
+        submitted = st.form_submit_button("Accéder à la carte")
+    if submitted:
+        if password == "Test":
+            st.session_state["abm_map_unlocked"] = True
+            st.rerun()
+        else:
+            st.error("Mot de passe incorrect.")
+    st.stop()
+
+
 def render_commercial_map():
+    require_temporary_map_password()
     st.title("Carte commerciale ABM")
     st.caption(MAP_TITLE)
 
