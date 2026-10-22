@@ -36,7 +36,7 @@ aside{position:absolute;left:0;top:0;bottom:0;width:min(86vw,340px);z-index:800;
 <div class="map-frame"><div id="map"></div><div class="status" id="status">Carte ABM</div></div></div></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
 "use strict";
-const DATA=__ABM_MAP_DATA__;
+const DATA=__ABM_MAP_DATA__; const FOCUS=__ABM_MAP_FOCUS__;
 const side=document.getElementById('side'), overlay=document.getElementById('overlay');
 const small=()=>matchMedia('(max-width:760px)').matches;
 const groups=new Map(),entries=[];
@@ -94,6 +94,10 @@ try{const b=geo.getBounds();if(b.isValid())bounds.extend(b)}catch(e){}
 entries.push({data:item,geo,label:dest.label,text:norm(item.name+' '+item.description+' '+dest.label)})
 }
 if(bounds.isValid())map.fitBounds(bounds.pad(.08),{maxZoom:10});
+if(FOCUS&&Number.isFinite(FOCUS.lat)&&Number.isFinite(FOCUS.lon)){
+  map.setView([FOCUS.lat,FOCUS.lon], FOCUS.zoom||11);
+  L.circleMarker([FOCUS.lat,FOCUS.lon],{radius:9,color:'#145d86',fillColor:'#fff',fillOpacity:1,weight:3}).addTo(map).bindPopup(esc(FOCUS.label||'Lieu recherché')).openPopup();
+}
 L.control.scale({imperial:false}).addTo(map);
 refresh();showSide(!small());setTimeout(()=>map.invalidateSize(),300);
 }
