@@ -16,7 +16,7 @@ def build_viewer_html(map_data: dict, selected_point=None) -> str:
         .replace("\u2028", "\\u2028")
         .replace("\u2029", "\\u2029")
     )
-    point_json = json.dumps(selected_point, ensure_ascii=False)
+    point_json = json.dumps(selected_point, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     return (
         _TEMPLATE.read_text(encoding="utf-8")
         .replace("__ABM_MAP_DATA__", data_json)
