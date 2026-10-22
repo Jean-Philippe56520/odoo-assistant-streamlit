@@ -88,3 +88,7 @@ Un watchdog navigateur vérifie périodiquement l'endpoint Streamlit `/_stcore/h
 - La carte pilote **Secteurs ABM V1 (pilote)** est utilisée à titre provisoire, sans intervention dans Odoo.
 - Un identifiant différent peut être configuré dans le secret Streamlit `ABM_MYMAPS_ID`. Le code de présentation et l'identifiant pilote doivent être retirés du dépôt après la présentation ; il ne s'agit pas d'une protection des données Google My Maps, qui restent accessibles à toute personne possédant le lien de partage.
 - Le formulaire de prospection demeure sur la page principale. Le changement de page est une opération Streamlit : **enregistrer ou terminer une saisie en cours** avant d'ouvrir la carte pour éviter toute perte des champs de formulaire non persistés.
+
+### Affichage mobile My Maps
+
+Sur certains mobiles, Google My Maps masque la recherche et les commandes des calques dans l'affichage intégré. Le bouton placé **au-dessus** de la carte ouvre la visionneuse Google My Maps complète dans un nouvel onglet pour retrouver les commandes disponibles. La carte intégrée demeure dans Streamlit, sans changement des données ou des calques Google.

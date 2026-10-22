@@ -64,6 +64,25 @@ def render_commercial_map():
         return
 
     embed_url, viewer_url = build_map_urls(map_id)
+
+    # My Maps masque parfois la légende et la recherche dans les iframes mobiles.
+    # Le lecteur complet donne accès aux commandes Google sans recréer la carte.
+    st.link_button(
+        "Recherche et calques : ouvrir la carte complète",
+        viewer_url,
+        type="primary",
+        icon=":material/open_in_new:",
+        width="stretch",
+        help="Ouvre Google My Maps dans un nouvel onglet, notamment sur mobile.",
+    )
+    st.caption(
+        "Sur téléphone, utilisez ce bouton pour accéder à la recherche, à la "
+        "légende et à l'affichage des calques dans Google My Maps."
+    )
+
     st.iframe(embed_url, height=760, width="stretch")
-    st.caption("Si la carte ne s'affiche pas ici, ouvrez-la directement dans Google My Maps.")
-    st.link_button("Ouvrir dans Google My Maps", viewer_url)
+    st.caption(
+        "Sur ordinateur, le bouton en haut à gauche de la carte ouvre le panneau "
+        "des calques. Google peut masquer certaines commandes dans la version "
+        "intégrée sur mobile."
+    )
