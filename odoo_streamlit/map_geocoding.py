@@ -51,7 +51,7 @@ def search_location(query):
     if len(query) < 2:
         return []
 
-    if re.fullmatch(r"\\d{5}", query):
+    if re.fullmatch(r"\d{5}", query):
         url = (
             "https://geo.api.gouv.fr/communes?codePostal="
             + urllib.parse.quote(query)
