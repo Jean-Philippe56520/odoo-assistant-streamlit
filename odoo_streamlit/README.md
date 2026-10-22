@@ -92,3 +92,11 @@ Un watchdog navigateur vérifie périodiquement l'endpoint Streamlit `/_stcore/h
 ### Affichage mobile My Maps
 
 Sur certains mobiles, Google My Maps masque la recherche et les commandes des calques dans l'affichage intégré. Le bouton placé **au-dessus** de la carte ouvre la visionneuse Google My Maps complète dans un nouvel onglet pour retrouver les commandes disponibles. La carte intégrée demeure dans Streamlit, sans changement des données ou des calques Google.
+
+### Carte ABM responsive intégrée
+
+L'interface mobile et ordinateur n'utilise plus seulement le miroir My Maps : elle charge les objets de l'export KML dans une carte interactive intégrée à Streamlit. La recherche se trouve au-dessus de la carte ; le bouton **Calques** ouvre un panneau tactile sur mobile et un panneau latéral sur ordinateur. Les calques peuvent être affichés ou masqués individuellement, ou ensemble. La sélection d'un résultat de recherche centre la carte sur l'objet recherché.
+
+L'export KML est récupéré côté serveur avec une mise en cache de 15 minutes ; les données ne sont pas commitées dans GitHub. Une connexion Internet est nécessaire pour charger le fond OpenStreetMap et Leaflet. Si l'export KML échoue, l'ancienne intégration My Maps reste disponible en secours. L'autorisation Google du lien n'est pas renforcée par le mot de passe de présentation.
+
+La vue restitue les calques, points, tracés et couleurs KML ; elle n'est **pas** une reproduction parfaite de tous les boutons, icônes et fonctions de l'éditeur My Maps. La recherche porte sur les noms et descriptions de la carte, pas sur toutes les adresses de Google.
