@@ -7,6 +7,8 @@ import streamlit as st
 
 
 MAP_SECRET_KEY = "ABM_MYMAPS_ID"
+# Valeur provisoire pour la démonstration ; remplacer par le secret déployé ensuite.
+DEMO_MAP_ID = "1K5FS9IMYVHoOQLTZYoUzZAomcSOS-WE"
 MAP_TITLE = "Secteurs ABM V1 (pilote)"
 MAP_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{10,128}$")
 
@@ -17,7 +19,7 @@ def get_map_id():
         configured_id = st.secrets.get(MAP_SECRET_KEY, "")
     except (FileNotFoundError, RuntimeError):
         configured_id = ""
-    raw_id = configured_id or os.environ.get(MAP_SECRET_KEY, "")
+    raw_id = configured_id or os.environ.get(MAP_SECRET_KEY, "") or DEMO_MAP_ID
     map_id = str(raw_id).strip()
     return map_id if MAP_ID_PATTERN.fullmatch(map_id) else None
 
