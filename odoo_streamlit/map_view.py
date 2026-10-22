@@ -53,10 +53,16 @@ def require_temporary_map_password():
     st.stop()
 
 
+@st.cache_data(ttl=900, show_spinner=False, max_entries=3)
+def _cached_commercial_map(map_id):
+    from odoo_streamlit.mymaps_data import load_map
+    return load_map(map_id)
+
+
 def render_commercial_map():
     require_temporary_map_password()
     st.title("Carte commerciale ABM")
-    st.caption(MAP_TITLE)
+    st.caption("Recherche et sélection des calques disponibles sur ordinateur et mobile.")
 
     map_id = get_map_id()
     if not map_id:
@@ -64,25 +70,21 @@ def render_commercial_map():
         return
 
     embed_url, viewer_url = build_map_urls(map_id)
-
-    # My Maps masque parfois la légende et la recherche dans les iframes mobiles.
-    # Le lecteur complet donne accès aux commandes Google sans recréer la carte.
-    st.link_button(
-        "Recherche et calques : ouvrir la carte complète",
-        viewer_url,
-        type="primary",
-        icon=":material/open_in_new:",
-        width="stretch",
-        help="Ouvre Google My Maps dans un nouvel onglet, notamment sur mobile.",
-    )
-    st.caption(
-        "Sur téléphone, utilisez ce bouton pour accéder à la recherche, à la "
-        "légende et à l'affichage des calques dans Google My Maps."
-    )
-
-    st.iframe(embed_url, height=760, width="stretch")
-    st.caption(
-        "Sur ordinateur, le bouton en haut à gauche de la carte ouvre le panneau "
-        "des calques. Google peut masquer certaines commandes dans la version "
-        "intégrée sur mobile."
-    )
+    try:
+        with st.spinner("Chargement de la carte et de ses calques..."):
+            map_data = _cached_commercial_map(map_id)
+        from odoo_streamlit.mymaps_viewer import build_viewer_html
+        import streamlit.components.v1 as components
+        components.html(build_viewer_html(map_data), height=740, scrolling=False)
+        st.caption(
+            f"{len(map_data['layers'])} calque(s) et {len(map_data['features'])} élément(s) "
+            "synchronisés avec My Maps environ toutes les 15 minutes. "
+            "Les tracés de la carte pilote restent provisoires."
+        )
+    except Exception as exc:
+        from odoo_streamlit.mymaps_data import MapImportError
+        if not isinstance(exc, (MapImportError, OSError, ValueError)):
+            raise
+        st.warning("Carte interactive temporairement indisponible ; affichage My Maps de secours.")
+        st.iframe(embed_url, height=740, width="stretch")
+        st.link_button("Ouvrir Google My Maps", viewer_url)
