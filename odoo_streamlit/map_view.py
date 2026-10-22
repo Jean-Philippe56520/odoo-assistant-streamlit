@@ -105,6 +105,9 @@ def render_commercial_map():
         point = results[choice]
         if st.button("Centrer la carte ici", key="abm_center_map", type="primary"):
             st.session_state["abm_map_selected_point"] = point
+            # La vue Google ne garantit pas le centrage depuis une iframe.
+            # La vue interactive ABM recentre toujours sur les coordonnées.
+            st.session_state["abm_map_display_mode"] = "Calques interactifs ABM"
 
     mode = st.radio(
         "Affichage",
