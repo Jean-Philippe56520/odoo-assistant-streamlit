@@ -1,0 +1,100 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{box-sizing:border-box}html,body{margin:0;height:100%;font-family:system-ui,Arial,sans-serif;color:#153a55}button,input{font:inherit}button{cursor:pointer}
+#app{display:flex;flex-direction:column;height:100vh;min-height:360px;background:#fff}
+header{display:flex;gap:10px;align-items:center;padding:10px;border-bottom:1px solid #e1e8ee;z-index:900;background:white}
+header strong{font-size:14px;white-space:nowrap}.search{flex:1;min-width:90px}
+#q{width:100%;border-radius:9px;border:1px solid #cbd8e2;padding:11px;font-size:14px;outline-offset:2px}
+button{border:1px solid #bfd2de;background:#f6fafc;color:#164e76;border-radius:9px;padding:10px 12px;font-weight:650}
+#toggle{background:#185c8e;color:white}.body{display:flex;min-height:0;flex:1;position:relative}
+aside{background:white;width:305px;flex:none;overflow:auto;z-index:750;border-right:1px solid #dce7ee;padding:12px}
+aside[hidden]{display:none}.section{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:10px}
+.section strong{font-size:14px}.section small{font-size:11px;color:#65798a}
+.actions{display:flex;gap:7px;margin:10px 0}.actions button{font-size:12px;padding:7px}
+.layer{display:flex;align-items:center;gap:9px;border-radius:8px;padding:10px 7px;cursor:pointer;font-size:13px}
+.layer:hover{background:#eef6fb}.layer input{width:18px;height:18px;accent-color:#185c8e;flex:none}
+.swatch{width:12px;height:12px;border-radius:3px;border:1px solid #aaa;flex:none}
+.layer-name{flex:1;overflow-wrap:anywhere}.count{font-size:11px;color:#637888;background:#ecf1f5;border-radius:4px;padding:3px}
+#results{margin-top:12px;border-top:1px solid #e3eaf0;padding-top:8px}
+.result{display:block;width:100%;border:0;text-align:left;padding:10px;background:white;white-space:normal;font-weight:500;font-size:12px}
+.result:hover{background:#edf7fc}.result small{display:block;margin-top:3px;color:#708395}
+.map-frame{position:relative;min-width:0;flex:1}#map{position:absolute;inset:0}
+#overlay{display:none}.status{position:absolute;bottom:20px;left:10px;background:white;border-radius:8px;padding:6px 9px;font-size:11px;z-index:500;box-shadow:0 2px 8px #0002}
+.leaflet-popup-content{max-height:220px;overflow:auto;overflow-wrap:anywhere;white-space:pre-line;font-size:12px}
+@media(max-width:760px){
+header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:8px}
+header strong{grid-column:1}#toggle{grid-column:2;grid-row:1}#q{grid-column:1/3;grid-row:2}
+aside{position:absolute;left:0;top:0;bottom:0;width:min(86vw,340px);z-index:800;box-shadow:4px 0 18px #0003}
+#overlay.open{display:block;position:absolute;inset:0;z-index:790;background:#0003}
+.status{max-width:75%}
+}
+</style></head><body>
+<div id="app"><header><strong>ABM · Carte commerciale</strong><input id="q" class="search" placeholder="Rechercher un point ou un secteur" type="search" aria-label="Rechercher"><button type="button" id="toggle" aria-expanded="true">☰ Calques</button></header>
+<div class="body"><div id="overlay"></div><aside id="side"><div class="section"><strong>Calques My Maps</strong><small id="counter"></small></div>
+<div class="actions"><button type="button" id="all">Tout afficher</button><button type="button" id="none">Tout masquer</button></div><div id="layers"></div><div id="results"></div></aside>
+<div class="map-frame"><div id="map"></div><div class="status" id="status">Carte ABM</div></div></div></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
+"use strict";
+const DATA=__ABM_MAP_DATA__;
+const side=document.getElementById('side'), overlay=document.getElementById('overlay');
+const small=()=>matchMedia('(max-width:760px)').matches;
+const groups=new Map(),entries=[];
+let map;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+function showSide(show){side.hidden=!show;overlay.classList.toggle('open',!!show&&small());document.getElementById('toggle').setAttribute('aria-expanded',String(!!show));if(map)setTimeout(()=>map.invalidateSize(),100)}
+document.getElementById('toggle').onclick=()=>showSide(side.hidden);
+overlay.onclick=()=>showSide(false);
+window.addEventListener('resize',()=>showSide(!small()));
+function refresh(){let visible=0;for(const o of groups.values())if(map.hasLayer(o.group))visible++;
+document.getElementById('counter').textContent=visible+' / '+groups.size;
+document.getElementById('status').textContent=visible+' calque(s) affiché(s) · '+DATA.features.length+' éléments'}
+function all(yes){for(const o of groups.values()){if(yes)o.group.addTo(map);else map.removeLayer(o.group);o.cb.checked=yes}refresh()}
+document.getElementById('all').onclick=()=>all(true);
+document.getElementById('none').onclick=()=>all(false);
+function zoom(entry){let obj=groups.get(entry.data.layer);if(!map.hasLayer(obj.group)){obj.group.addTo(map);obj.cb.checked=true;refresh()}
+let b=entry.geo.getBounds();if(b.isValid()){if(b.getNorthEast().equals(b.getSouthWest()))map.setView(b.getCenter(),12);else map.fitBounds(b.pad(.3),{maxZoom:12})}
+entry.geo.eachLayer(layer=>{if(layer.openPopup)layer.openPopup()});if(small())showSide(false)}
+function search(){
+const q=norm(document.getElementById('q').value.trim()),root=document.getElementById('results');root.replaceChildren();
+if(!q)return;
+if(small()&&side.hidden)showSide(true);
+const found=entries.filter(e=>e.text.includes(q)),heading=document.createElement('strong');heading.textContent=found.length+' résultat(s)';root.appendChild(heading);
+for(const entry of found.slice(0,60)){const b=document.createElement('button');b.className='result';b.type='button';
+b.textContent=entry.data.name;const label=document.createElement('small');label.textContent=entry.label;b.appendChild(label);b.onclick=()=>zoom(entry);root.appendChild(b)}
+if(!found.length){const p=document.createElement('p');p.textContent='Aucun résultat. Essayez un nom de secteur, une ville ou un point.';root.appendChild(p)}
+}
+let timer;document.getElementById('q').oninput=()=>{clearTimeout(timer);timer=setTimeout(search,130)};
+if(typeof L==='undefined'){document.getElementById('map').textContent='Le fond de carte est indisponible. Vérifiez la connexion Internet.'}
+else{
+map=L.map('map',{preferCanvas:true}).setView([47.7,-2.6],7);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors',maxZoom:19}).addTo(map);
+const bounds=L.latLngBounds([]);
+for(const layer of DATA.layers){
+const group=L.layerGroup().addTo(map),label=document.createElement('label');label.className='layer';
+const cb=document.createElement('input');cb.type='checkbox';cb.checked=true;
+const dot=document.createElement('span');dot.className='swatch';dot.style.background=layer.color;
+const title=document.createElement('span');title.className='layer-name';title.textContent=layer.name;
+const count=document.createElement('span');count.className='count';count.textContent=layer.count;
+label.append(cb,dot,title,count);document.getElementById('layers').appendChild(label);
+cb.onchange=()=>{if(cb.checked)group.addTo(map);else map.removeLayer(group);refresh()};
+groups.set(layer.id,{group,cb,label:layer.name});
+}
+for(const item of DATA.features){
+const dest=groups.get(item.layer);if(!dest)continue;const s=item.style||{};
+const color=s.polyColor||s.iconColor||s.lineColor||'#1b6491';
+const geo=L.geoJSON(item.geometry,{
+style:()=>({color:s.lineColor||color,weight:s.weight||2,opacity:s.lineOpacity??.8,fillColor:color,fillOpacity:s.polyOpacity??.5}),
+pointToLayer:(_f,ll)=>L.circleMarker(ll,{radius:7,color:'#fff',weight:1.7,fillColor:s.iconColor||color,fillOpacity:1})
+});
+const popup='<strong>'+esc(item.name)+'</strong><div style="color:#698399;margin:5px 0">'+esc(dest.label)+'</div><div>'+esc(item.description)+'</div>';
+geo.bindPopup(popup).addTo(dest.group);
+try{const b=geo.getBounds();if(b.isValid())bounds.extend(b)}catch(e){}
+entries.push({data:item,geo,label:dest.label,text:norm(item.name+' '+item.description+' '+dest.label)})
+}
+if(bounds.isValid())map.fitBounds(bounds.pad(.08),{maxZoom:10});
+L.control.scale({imperial:false}).addTo(map);
+refresh();showSide(!small());setTimeout(()=>map.invalidateSize(),300);
+}
+</script></body></html>
