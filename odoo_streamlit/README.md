@@ -79,3 +79,12 @@ Le brouillon est supprimé uniquement dans les cas suivants :
 La session Streamlit possède aussi un identifiant technique local. Si le navigateur revient avec un ancien identifiant et que Streamlit en génère un nouveau, l'application affiche un message `Session réinitialisée` et conseille de recharger ou de reprendre le brouillon.
 
 Un watchdog navigateur vérifie périodiquement l'endpoint Streamlit `/_stcore/health`. Si l'application ne répond pas, un bandeau `Connexion interrompue` est affiché côté navigateur.
+
+## Carte commerciale ABM (présentation provisoire)
+
+- Depuis le menu latéral Streamlit, ouvrir **Carte commerciale**.
+- La page demande d'abord l'authentification ABM habituelle, puis un code d'accès de présentation temporaire, conservé pour la session Streamlit.
+- Le contenu utilise l'intégration Google My Maps. Les calques se manipulent dans l'interface Google intégrée, si celle-ci les affiche. Un lien **Ouvrir dans Google My Maps** permet d'accéder à l'interface complète.
+- La carte pilote **Secteurs ABM V1 (pilote)** est utilisée à titre provisoire, sans intervention dans Odoo.
+- Un identifiant différent peut être configuré dans le secret Streamlit `ABM_MYMAPS_ID`. Le code de présentation et l'identifiant pilote doivent être retirés du dépôt après la présentation ; il ne s'agit pas d'une protection des données Google My Maps, qui restent accessibles à toute personne possédant le lien de partage.
+- Le formulaire de prospection demeure sur la page principale. Le changement de page est une opération Streamlit : **enregistrer ou terminer une saisie en cours** avant d'ouvrir la carte pour éviter toute perte des champs de formulaire non persistés.
