@@ -36,7 +36,7 @@ aside{position:absolute;left:0;top:0;bottom:0;width:min(86vw,340px);z-index:800;
 <div class="map-frame"><div id="map"></div><div class="status" id="status">Carte ABM</div></div></div></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
 "use strict";
-const DATA=__ABM_MAP_DATA__;
+const DATA=__ABM_MAP_DATA__; const FOCUS=__ABM_MAP_FOCUS__;
 const side=document.getElementById('side'), overlay=document.getElementById('overlay');
 const small=()=>matchMedia('(max-width:760px)').matches;
 const groups=new Map(),entries=[];
@@ -86,7 +86,14 @@ const dest=groups.get(item.layer);if(!dest)continue;const s=item.style||{};
 const color=s.polyColor||s.iconColor||s.lineColor||'#1b6491';
 const geo=L.geoJSON(item.geometry,{
 style:()=>({color:s.lineColor||color,weight:s.weight||2,opacity:s.lineOpacity??.8,fillColor:color,fillOpacity:s.polyOpacity??.5}),
-pointToLayer:(_f,ll)=>L.circleMarker(ll,{radius:7,color:'#fff',weight:1.7,fillColor:s.iconColor||color,fillOpacity:1})
+pointToLayer:(_f,ll)=>{
+  const href=s.iconHref||'';
+  if(/^https:\/\/([a-z0-9-]+\.)*(google\.com|gstatic\.com|googleusercontent\.com)\//i.test(href)){
+    const size=Math.round(28*(s.iconScale||1));
+    return L.marker(ll,{icon:L.icon({iconUrl:href,iconSize:[size,size],iconAnchor:[size/2,size],popupAnchor:[0,-size]})});
+  }
+  return L.circleMarker(ll,{radius:7,color:'#fff',weight:1.7,fillColor:s.iconColor||color,fillOpacity:1});
+}
 });
 const popup='<strong>'+esc(item.name)+'</strong><div style="color:#698399;margin:5px 0">'+esc(dest.label)+'</div><div>'+esc(item.description)+'</div>';
 geo.bindPopup(popup).addTo(dest.group);
@@ -94,6 +101,10 @@ try{const b=geo.getBounds();if(b.isValid())bounds.extend(b)}catch(e){}
 entries.push({data:item,geo,label:dest.label,text:norm(item.name+' '+item.description+' '+dest.label)})
 }
 if(bounds.isValid())map.fitBounds(bounds.pad(.08),{maxZoom:10});
+if(FOCUS&&Number.isFinite(FOCUS.lat)&&Number.isFinite(FOCUS.lon)){
+  map.setView([FOCUS.lat,FOCUS.lon], FOCUS.zoom||11);
+  L.circleMarker([FOCUS.lat,FOCUS.lon],{radius:9,color:'#145d86',fillColor:'#fff',fillOpacity:1,weight:3}).addTo(map).bindPopup(esc(FOCUS.label||'Lieu recherché')).openPopup();
+}
 L.control.scale({imperial:false}).addTo(map);
 refresh();showSide(!small());setTimeout(()=>map.invalidateSize(),300);
 }

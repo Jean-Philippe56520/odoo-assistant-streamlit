@@ -2,6 +2,7 @@
 import re
 import html
 import urllib.request
+from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
 MAX_BYTES = 35_000_000
@@ -41,6 +42,27 @@ def _style(e):
                     style["weight"] = min(8, max(1, float(_text(section, "width", "2"))))
                 except ValueError:
                     pass
+            if tag == "IconStyle":
+                # Restituer les pictogrammes de Google My Maps lorsque le KML
+                # fournit une URL d'image Google publique.
+                href = _text(_child(section, "Icon"), "href").strip()
+                if href.startswith("http://"):
+                    href = "https://" + href[7:]
+                parsed = urlsplit(href)
+                host = (parsed.hostname or "").lower()
+                if parsed.scheme == "https" and (
+                    host == "google.com"
+                    or host.endswith(".google.com")
+                    or host == "gstatic.com"
+                    or host.endswith(".gstatic.com")
+                    or host == "googleusercontent.com"
+                    or host.endswith(".googleusercontent.com")
+                ):
+                    style["iconHref"] = href
+                try:
+                    style["iconScale"] = min(1.6, max(0.7, float(_text(section, "scale", "1"))))
+                except ValueError:
+                    style["iconScale"] = 1.0
     return style
 
 def _coords(s):
